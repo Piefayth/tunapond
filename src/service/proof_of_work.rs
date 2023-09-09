@@ -1,4 +1,12 @@
 use std::sync::Arc;
+use cardano_multiplatform_lib::error::JsError;
+use cardano_multiplatform_lib::ledger::common::value::BigInt;
+use cardano_multiplatform_lib::ledger::common::value::BigNum;
+use cardano_multiplatform_lib::plutus::ConstrPlutusData;
+use cardano_multiplatform_lib::plutus::PlutusData;
+use cardano_multiplatform_lib::plutus::PlutusList;
+use cardano_multiplatform_lib::plutus::encode_json_str_to_plutus_datum;
+use sha2::{Sha256, Digest};
 use chrono::NaiveDateTime;
 use chrono::Duration;
 use serde::{Serialize, Deserialize};
@@ -15,12 +23,20 @@ use super::block::{BlockService, BlockServiceError, ReadableBlock};
 pub enum SubmitProofOfWorkError {
     DatabaseError(sqlx::Error),
     NoCurrentSession,
+    InvalidTargetState,
     BlockServiceFailure(BlockServiceError),
+    PlutusParseError(JsError)
 }
 
 impl From<sqlx::Error> for SubmitProofOfWorkError {
     fn from(err: sqlx::Error) -> Self {
         SubmitProofOfWorkError::DatabaseError(err)
+    }
+}
+
+impl From<JsError> for SubmitProofOfWorkError {
+    fn from(err: JsError) -> Self {
+        SubmitProofOfWorkError::PlutusParseError(err)
     }
 }
 
@@ -37,6 +53,8 @@ pub struct SubmitProofOfWorkResponse {
     working_block: ReadableBlock,
 }
 
+const SAMPLING_DIFFICULTY: u8 = 8;
+
 pub async fn submit_proof_of_work(
     pool: &SqlitePool,
     block_service: &Arc<BlockService>,
@@ -49,17 +67,75 @@ pub async fn submit_proof_of_work(
         Some(latest_session) => {
             // TODO: Some database errors (like primary key collisions) are a result of malicious miner
                 // behavior. Depending on the error, miners may need removed from the pool...
-
-            // TODO: Check how many of the submitted were actually valid for the target state
-                // Also check that they had sufficient 0s for the baseline sampling difficulty
             
             // TODO: Check that the miner is mining the block their session is assigned. Reject hashes that aren't.
                 // Also, update their session assignment if the current block is new
-            let num_accepted = proof_of_work::create(pool, latest_session.id, &submission.entries)
-                .await
-                .map_err(SubmitProofOfWorkError::from)?;
+
 
             let current_block = block_service.get_latest()?;
+            let default_nonce: [u8; 16] = [0; 16];
+
+            let mut target_state_fields = PlutusList::new();
+
+            let nonce_field = PlutusData::new_bytes(default_nonce.to_vec());
+            let block_number_bigint = BigInt::from_str(&format!("{}", &current_block.block_number))?;    // TODO: How to make BigInt from a number...?
+            let block_number_field = PlutusData::new_integer(&block_number_bigint);
+            let current_hash_field = PlutusData::new_bytes(current_block.current_hash.clone());
+            let leading_zeroes_bigint = BigInt::from_str(&format!("{}", &current_block.leading_zeroes))?; 
+            let leading_zeroes_field = PlutusData::new_integer(&leading_zeroes_bigint);
+            let difficulty_number_bigint = BigInt::from_str(&format!("{}", &current_block.difficulty_number))?; 
+            let difficulty_number_field = PlutusData::new_integer(&difficulty_number_bigint);
+            let epoch_time_bigint = BigInt::from_str(&format!("{}", &current_block.epoch_time))?; 
+            let epoch_time_field = PlutusData::new_integer(&epoch_time_bigint);
+
+            target_state_fields.add(&nonce_field);
+            target_state_fields.add(&block_number_field);
+            target_state_fields.add(&current_hash_field);
+            target_state_fields.add(&leading_zeroes_field);
+            target_state_fields.add(&difficulty_number_field);
+            target_state_fields.add(&epoch_time_field);
+
+            let target_state = PlutusData::new_constr_plutus_data(
+                &ConstrPlutusData::new(&BigNum::from_str("0").unwrap(), &target_state_fields)
+            );
+
+            let mut target_state_bytes = target_state.to_bytes();
+
+            let valid_samples: Vec<_> = submission.entries.iter()
+                .filter(|&entry| {
+                    let sha_binding = hex::decode(&entry.sha).unwrap_or_default();
+                    let sha_bytes = sha_binding.as_slice();
+                    let nonce_binding = hex::decode(&entry.nonce).unwrap_or_default();
+                    let nonce_bytes = nonce_binding.as_slice();
+                    let entry_difficulty = get_difficulty(sha_bytes);
+
+                    if entry_difficulty.leading_zeroes < SAMPLING_DIFFICULTY as u128 {
+                        return false
+                    }
+                    
+                    target_state_bytes[4..20].copy_from_slice(nonce_bytes);
+                    let hashed_data = sha256_digest_as_bytes(&target_state_bytes);
+                    let hashed_hash = sha256_digest_as_bytes(&hashed_data);
+
+                    if !hashed_hash.eq(sha_bytes){
+                        return false
+                    }
+
+                    true
+
+                })
+                .collect();
+            
+            // TODO: If any of the above samples are actual new datums, submit them on chain
+
+            let num_accepted = proof_of_work::create(
+                pool, 
+                latest_session.id, 
+                latest_session.currently_mining_block, 
+                &valid_samples
+            )
+            .await
+            .map_err(SubmitProofOfWorkError::from)?;
 
             Ok(
                 SubmitProofOfWorkResponse {
@@ -74,6 +150,14 @@ pub async fn submit_proof_of_work(
         }
     }
 
+}
+
+fn sha256_digest_as_bytes(data: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(data);
+    let result = hasher.finalize();
+    let arr: [u8; 32] = result.into();
+    arr
 }
 
 #[derive(Debug)]
@@ -129,10 +213,6 @@ fn estimate_hashes_for_difficulty(proofs: usize, zeros: u32) -> f64 {
     (proofs as f64) / p_n
 }
 
-fn calculate_hashrate(total_hashes: f64, duration: Duration) -> f64 {
-    total_hashes / duration.num_seconds() as f64
-}
-
 /// Given a vec of ProofOfWork structs and a time range, calculate the hashrate.
 fn estimate_hashrate(proofs: &Vec<ProofOfWork>, start_time: NaiveDateTime, end_time: NaiveDateTime) -> f64 {
     let duration = end_time - start_time;
@@ -142,5 +222,40 @@ fn estimate_hashrate(proofs: &Vec<ProofOfWork>, start_time: NaiveDateTime, end_t
     
     let total_hashes = estimate_hashes_for_difficulty(valid_proofs, zeros);
     
-    calculate_hashrate(total_hashes, duration)
+    total_hashes / duration.num_seconds() as f64
+}
+
+// TODO: Why are these u128s?
+#[derive(Default)]
+pub struct Difficulty {
+    pub leading_zeroes: u128,
+    pub difficulty_number: u128
+}
+
+pub fn get_difficulty(hash: &[u8]) -> Difficulty {
+    if hash.len() != 32 {
+        return Difficulty::default()
+    }
+
+    let mut leading_zeroes = 0;
+    let mut difficulty_number = 0;
+
+    for (indx, &chr) in hash.iter().enumerate() {
+        if chr != 0 {
+            if (chr & 0x0F) == chr {
+                leading_zeroes += 1;
+                difficulty_number += (chr as u128) * 4096;
+                difficulty_number += (hash[indx + 1] as u128) * 16;
+                difficulty_number += (hash[indx + 2] as u128) / 16;
+                return Difficulty { leading_zeroes, difficulty_number }
+            } else {
+                difficulty_number += (chr as u128) * 256;
+                difficulty_number += hash[indx + 1] as u128;
+                return Difficulty { leading_zeroes, difficulty_number }
+            }
+        } else {
+            leading_zeroes += 2;
+        }
+    }
+    return Difficulty { leading_zeroes: 32, difficulty_number: 0 }
 }

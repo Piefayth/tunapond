@@ -186,7 +186,6 @@ fn block_from_datum(datum: String) -> Result<Block, BlockServiceError> {
             BlockServiceError::BlockParseFailure
         })?;
     
-
     let block_number = typed_data.data().get(0).as_integer().unwrap().as_int().unwrap().as_i32_or_nothing().unwrap() as i64;
     let current_hash = typed_data.data().get(1).as_bytes().unwrap();
     let leading_zeroes = typed_data.data().get(2).as_integer().unwrap().as_int().unwrap().as_i32_or_nothing().unwrap() as u8;

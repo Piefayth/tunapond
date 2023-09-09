@@ -57,12 +57,26 @@ async fn submit(
                     )
                 },
                 SubmitProofOfWorkError::BlockServiceFailure(_) => {
-                    HttpResponse::BadRequest().json(
+                    HttpResponse::InternalServerError().json(
                         GenericMessageResponse { 
                             message: format!("Could not verify submission - BlockService is down.")
                         }
                     )
                 },
+                SubmitProofOfWorkError::PlutusParseError(_) => {
+                    HttpResponse::InternalServerError().json(
+                        GenericMessageResponse { 
+                            message: format!("Could not verify submission - unable to parse plutus data.")
+                        }
+                    )
+                },
+                SubmitProofOfWorkError::InvalidTargetState => {
+                    HttpResponse::InternalServerError().json(
+                        GenericMessageResponse { 
+                            message: format!("Could not verify submission - unable to create a valid target state.")
+                        }
+                    )
+                }
             }
         },
     }

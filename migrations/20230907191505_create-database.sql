@@ -12,7 +12,8 @@ CREATE TABLE mining_sessions(
 CREATE INDEX idx_address ON mining_sessions(public_key_hash);
 
 CREATE TABLE proof_of_work(
-    mining_session_id INTEGER NOT NULL,                   
+    mining_session_id INTEGER NOT NULL,
+    block_number INTEGER NOT NULL,                 
     sha TEXT CHECK(length(sha) = 64) NOT NULL,   
     nonce TEXT CHECK(length(nonce) = 32) NOT NULL,
     created_at DATETIME NOT NULL,

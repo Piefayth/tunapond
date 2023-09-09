@@ -1,3 +1,4 @@
+use std::fs::File;
 use std::sync::Arc;
 use std::{path::Path, fs};
 
@@ -22,7 +23,7 @@ async fn main() -> std::io::Result<()> {
     if dotenv::dotenv().is_err() {
         println!(".env file not loaded. If you intended to use one, ensure it exists.");
     }
-
+    // TODO: Respect and utilize the NETWORK env var where appropriate.
     env_logger::init();
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
@@ -31,8 +32,12 @@ async fn main() -> std::io::Result<()> {
 
     if let Some(parent) = db_path.parent() {
         if !parent.exists() {
-            fs::create_dir_all(parent).expect("Failed to create database directory");
+            fs::create_dir_all(parent).expect("Failed to create database directory.");
         }
+    }
+
+    if !db_path.exists() {
+        File::create(&db_path).expect("Failed to create database file.");
     }
 
     let pool = SqlitePool::connect(&format!("{}", database_url)).await.unwrap();

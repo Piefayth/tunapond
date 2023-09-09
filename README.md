@@ -6,7 +6,7 @@ A work in progress mining pool for Fortuna.
 - Copy `.env.example` to `.env`
 - Set your `KUPO_URL` in `.env`.
 - `cargo install sqlx-cli`
-- `sqlx database setup``
+- `sqlx database setup`
 - `cargo run --release`
 
 ## API
