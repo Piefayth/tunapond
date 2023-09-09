@@ -2,7 +2,7 @@ CREATE TABLE mining_sessions(
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, 
     public_key_hash TEXT NOT NULL,                
     start_time DATETIME NOT NULL,        
-    currently_mining_block INTEGER NOT NULL, -- pool will tell user what to mine, they wont watch the chain 
+    currently_mining_block INTEGER NOT NULL,
     end_time DATETIME,
     payment_due INTEGER,
     payment_transaction TEXT CHECK(length(payment_transaction) = 64),
