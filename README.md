@@ -20,7 +20,7 @@ Takes a wallet-signed message with an arbitrary payload. The payload being arbit
 ```json
 {
 	"address": "addr1q9g0grcjlq0jeunpt27gy8w698zukar7wgsy9qp6fjkr23pcsufznxyrxw7j84uaypjvdk7yz3ft007hyx9wm6x7djssrusn86",
-	"payload": "test",
+	"payload": "eventually this message will matter and be validated",
 	"key": "a40101032720062158206a52560327885ea742d6b7334d75d78d2b11775bfd1f08aabcb366adb448b3fb",
 	"signature": "845846a20127676164647265737358390150f40f12f81f2cf2615abc821dda29c5cb747e722042803a4cac354438871229988333bd23d79d2064c6dbc41452b7bfd7218aede8de6ca1a166686173686564f4447465737458400ce79a0cbfe6a66d77af0f1e88372d9b7246f387360435b290605366bb74574138f5af9b4bf9bf36ad69a51bd2cd365e03a8589a96adad2d3e9cc9677e87e70c"
 }
