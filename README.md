@@ -42,7 +42,7 @@ const registration: Registration = {
 
 #### Response
 
-Contains information about the started session, including the current block to mine. Miners are expected to ONLY mine the block the pool has told them to, regardless of them having seen an earlier block through some other mechanism. This response is sufficient information to being mining immediately.
+Contains information about the started session, including the current block to mine. Miners are expected to ONLY mine the block the pool has told them to, regardless of them having seen an earlier block through some other mechanism. This response is sufficient information to begin mining immediately.
 
 ```json
 {
@@ -60,8 +60,7 @@ Contains information about the started session, including the current block to m
 		"extra": "416c4c204861496c2074556e41",
 		"interlink": [
 			"000000000000dd784f38e2addf70011151fdeef4465710908b6ce930665b7e9b",
-			"000000000000dd784f38e2addf70011151fdeef4465710908b6ce930665b7e9b",
-            ...
+			"000000000000dd784f38e2addf70011151fdeef4465710908b6ce930665b7e9b"
 		]
 	}
 }
@@ -123,8 +122,7 @@ If `block_number` has changed since the last time the client has submitted or re
 		"extra": "416c4c204861496c2074556e41",
 		"interlink": [
 			"0000000000013ed9abdc3f6addd91bb07a73b989c68dabab48aa4be409883afa",
-			"000000000000777b771189508ecefddc36a6ff8cff7a2a35cbc2556467d9ae10",
-            ...
+			"000000000000777b771189508ecefddc36a6ff8cff7a2a35cbc2556467d9ae10"
 		]
 	}
 }
