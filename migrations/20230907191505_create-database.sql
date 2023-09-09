@@ -1,10 +1,3 @@
--- next steps
-    -- server needs to track inocming hashrates / pow
-        -- has to check that users didnt double submit a sha too
-    -- the server needs a wallet to submit transactions with
-    -- server needs to be able to submit datum transactions
-
-
 CREATE TABLE mining_sessions(
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, 
     public_key_hash TEXT NOT NULL,                
@@ -35,12 +28,3 @@ CREATE TABLE datum_submissions(
     created_at DATETIME NOT NULL,
     FOREIGN KEY(sha) REFERENCES proof_of_work(sha)
 );
-
--- CREATE TABLE server_internal_events(
---     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
---     event_type TEXT CHECK(event_type IN ('BOOT', 'REFRESH', 'PAYOUT', 'SHUTDOWN')),
---     description TEXT,
---     created_at DATETIME NOT NULL
--- );
-
---     PlutusData::new_bytes(bytes)
