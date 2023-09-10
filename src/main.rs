@@ -5,6 +5,7 @@ use std::{path::Path, fs};
 use actix_web::web::Data;
 use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use service::block::{BlockService, block_updater};
+use service::submission::submission_updater;
 use sqlx::{SqlitePool};
 
 mod address;
@@ -46,7 +47,8 @@ async fn main() -> std::io::Result<()> {
 
     let block_service = Arc::new(BlockService::new());
     tokio::spawn(block_updater(block_service.clone()));
-
+    tokio::spawn(submission_updater(pool.clone()));
+    
     HttpServer::new(move || {
         App::new()
             .app_data(Data::new(pool.clone()))

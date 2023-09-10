@@ -7,6 +7,7 @@ pub struct DatumSubmission {
     pub is_definitely_accepted: bool,
     pub is_definitely_rejected: bool,
     pub created_at: NaiveDateTime,
+    pub block_number: i64,  // added this field
 }
 
 pub async fn create(
@@ -27,13 +28,57 @@ pub async fn create(
     .map(|r| r.rows_affected())
 }
 
+pub async fn accept(pool: &SqlitePool, submissions: Vec<DatumSubmission>) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    for submission in submissions.iter() {
+        sqlx::query!(
+            r#"
+            UPDATE datum_submissions
+            SET is_definitely_accepted = true, is_definitely_rejected = false
+            WHERE transaction_hash = ?
+            "#,
+            submission.transaction_hash
+        )
+        .execute(tx.as_mut())
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+pub async fn reject(pool: &SqlitePool, submissions: Vec<DatumSubmission>) -> Result<(), sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
+    for submission in submissions.iter() {
+        sqlx::query!(
+            r#"
+            UPDATE datum_submissions
+            SET is_definitely_accepted = false, is_definitely_rejected = true
+            WHERE transaction_hash = ?
+            "#,
+            submission.transaction_hash
+        )
+        .execute(tx.as_mut())
+        .await?;
+    }
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
 pub async fn get_unconfirmed(pool: &SqlitePool) -> Result<Vec<DatumSubmission>, sqlx::Error> {
     sqlx::query_as!(
         DatumSubmission,
         r#"
-        SELECT transaction_hash, sha, is_definitely_accepted, is_definitely_rejected, created_at
-        FROM datum_submissions
-        WHERE is_definitely_accepted = false AND is_definitely_rejected = false
+        SELECT ds.transaction_hash, ds.sha, ds.is_definitely_accepted, 
+               ds.is_definitely_rejected, ds.created_at, pow.block_number
+        FROM datum_submissions AS ds
+        JOIN proof_of_work AS pow ON ds.sha = pow.sha
+        WHERE ds.is_definitely_accepted = false AND ds.is_definitely_rejected = false
         "#,
     )
     .fetch_all(pool)
@@ -44,9 +89,11 @@ pub async fn get_confirmed(pool: &SqlitePool) -> Result<Vec<DatumSubmission>, sq
     sqlx::query_as!(
         DatumSubmission,
         r#"
-        SELECT transaction_hash, sha, is_definitely_accepted, is_definitely_rejected, created_at
-        FROM datum_submissions
-        WHERE is_definitely_accepted = true OR is_definitely_rejected = true
+        SELECT ds.transaction_hash, ds.sha, ds.is_definitely_accepted, 
+               ds.is_definitely_rejected, ds.created_at, pow.block_number
+        FROM datum_submissions AS ds
+        JOIN proof_of_work AS pow ON ds.sha = pow.sha
+        WHERE ds.is_definitely_accepted = true OR ds.is_definitely_rejected = true
         "#,
     )
     .fetch_all(pool)

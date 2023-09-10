@@ -55,18 +55,18 @@ struct KupoDatumResponse {
     datum: String
 }
 
-#[derive(Debug, Deserialize)]
-struct KupoTransaction {
-    datum_hash: String,
-    value: KupoValue,
-    output_index: i64,
-    transaction_id: String,
+#[derive(Debug, Deserialize, Clone)]
+pub struct KupoTransaction {
+    pub datum_hash: Option<String>,
+    pub value: KupoValue,
+    pub output_index: i64,
+    pub transaction_id: String,
 }
 
-#[derive(Debug, Deserialize)]
-struct KupoValue {
-    coins: u64,
-    assets: HashMap<String, u64>,
+#[derive(Debug, Deserialize, Clone)]
+pub struct KupoValue {
+    pub coins: u64,
+    pub assets: Option<HashMap<String, u64>>,
 }
 
 #[derive(Debug)]
@@ -112,6 +112,7 @@ impl BlockService {
         Ok(read_history.front().unwrap_or(&default_block).clone()) // We clone to own the data outside the lock
     }
 
+
     async fn update_history(&self) -> Result<(), BlockServiceError> {
         let network = std::env::var("NETWORK").unwrap_or(String::from("Mainnet"));
         let nft_policy = match &*network {
@@ -128,12 +129,17 @@ impl BlockService {
         
         let most_recent_datum_tx: KupoTransaction = all_contract_unspent_tx.into_iter()
             .find(|tx| {
-                tx.value.assets.get(nft_policy) == Some(&1)
+                let Some(assets) = &tx.value.assets else {
+                    return false
+                };
+
+                assets.get(nft_policy) == Some(&1)
             })
             .ok_or(BlockServiceError::NoMatchingContractTransaction)?;
 
         
-        let most_recent_datum: KupoDatumResponse = reqwest::get(format!("{}/datums/{}", self.kupo_url, most_recent_datum_tx.datum_hash))
+        let datum_hash = &most_recent_datum_tx.clone().datum_hash.unwrap();
+        let most_recent_datum: KupoDatumResponse = reqwest::get(format!("{}/datums/{}", self.kupo_url, &datum_hash))
             .await?
             .json()
             .await?;

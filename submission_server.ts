@@ -1,6 +1,9 @@
 import { load } from "https://deno.land/std@0.201.0/dotenv/mod.ts"
 import { Constr, Data, Kupmios, Lucid, Network, fromHex, fromText, toHex } from "https://deno.land/x/lucid@0.10.1/mod.ts"
-await load({export: true})
+await load({ export: true })
+
+const delay = (ms: number | undefined) =>
+  new Promise((res) => setTimeout(res, ms));
 
 const poolWalletPrivateKey = Deno.env.get("POOL_WALLET_PRIVATE_KEY")
 const network = Deno.env.get("NETWORK") as Network
@@ -22,12 +25,34 @@ const TUNA_VALIDATOR_ADDRESS_MAINNET = "addr1wynelppvx0hdjp2tnc78pnt28veznqjecf9
 const TUNA_VALIDATOR_ADDRESS_PREVIEW = "addr_test1wpgzl0aa4lramtdfcv6m69zq0q09g3ws3wk6wlwzqv5xdfsdcf2qa"
 
 async function handler(request: Request): Promise<Response> {
+  const url = new URL(request.url);
+  
+  if (url.pathname === "/submit") {
+    return handleSubmit(request);
+  } else if (url.pathname === "/payment") {
+    return handlePayment(request);
+  } else {
+    return new Response("Not Found", { status: 404 });
+  }
+}
+
+async function handlePayment(request: Request): Promise<Response> {
+  // todo
+}
+
+async function handleSubmit(request: Request): Promise<Response> {
   const answer = await request.json()
   if (!answer.nonce || !answer.current_block || !answer.new_zeroes || !answer.new_difficulty) {
     return new Response(JSON.stringify({
       message: "sent a bad submission"
     }), { status: 400 })
   }
+
+  return handleSubmitRetrying(answer)
+}
+
+async function handleSubmitRetrying(answer: any, retries = 0): Promise<Response> {
+  console.log("POST /submit")
 
   const validatorHash = network === "Mainnet" ? TUNA_VALIDATOR_HASH_MAINNET : TUNA_VALIDATOR_HASH_PREVIEW
   const validatorAddress = network === "Mainnet" ? TUNA_VALIDATOR_ADDRESS_MAINNET : TUNA_VALIDATOR_ADDRESS_PREVIEW
@@ -44,20 +69,20 @@ async function handler(request: Request): Promise<Response> {
   const realTimeNow = Number((Date.now() / 1000).toFixed(0)) * 1000 - 60000;
   const new_diff = getDifficulty(fromHex(answer.sha))
   const interlink = calculateInterlink(answer.sha, new_diff, {
-    leadingZeros: BigInt(answer.current_block.leading_zeroes), 
+    leadingZeros: BigInt(answer.current_block.leading_zeroes),
     difficulty_number: BigInt(answer.current_block.difficulty_number),
   }, answer.current_block.interlink.map(toHex) as string[]);
-  
+
   let epoch_time = BigInt(answer.current_block.epoch_time) + BigInt(90000 + realTimeNow) - BigInt(answer.current_block.current_time)
 
   let leading_zeroes = BigInt(answer.current_block.leading_zeroes)
   let difficulty_number = BigInt(answer.current_block.difficulty_number)
-  
+
   if (answer.current_block.block_number % 2016 === 0 && answer.current_block.block_number > 0) {
     const adjustment = getDifficultyAdjustement(epoch_time as unknown as bigint, 1_209_600_000n);
     epoch_time = 0n;
 
-    
+
     const new_difficulty = calculateDifficultyNumber(
       {
         leadingZeros: answer.current_block.leading_zeroes as bigint,
@@ -82,55 +107,65 @@ async function handler(request: Request): Promise<Response> {
     interlink,
   ]);
   const outDat = Data.to(postDatum);
-  console.log(postDatum)
   const mintTokens = { [validatorHash + fromText("TUNA")]: 5000000000n }
   const masterToken = { [validatorHash + fromText("lord tuna")]: 1n }
   try {
     const tx = await lucid.newTx()
-    .collectFrom(
-      [validatorOutRef],
-      Data.to(new Constr(1, [answer.nonce])),
-    )
-    .payToAddressWithData(
-      validatorAddress,
-      { inline: outDat },
-      masterToken
-    )
-    .mintAssets(mintTokens, Data.to(new Constr(0, [])))
-    .attachSpendingValidator({
-      type: "PlutusV2",
-      script: validatorCode
-    })
-    .validTo(realTimeNow + 180000)
-    .validFrom(realTimeNow)
-    .complete();
-  
-    const signed = await tx.sign().complete()
-    
-    const tx_hash = await signed.submit()
+      .collectFrom(
+        [validatorOutRef],
+        Data.to(new Constr(1, [answer.nonce])),
+      )
+      .payToAddressWithData(
+        validatorAddress,
+        { inline: outDat },
+        masterToken
+      )
+      .mintAssets(mintTokens, Data.to(new Constr(0, [])))
+      .attachSpendingValidator({
+        type: "PlutusV2",
+        script: validatorCode
+      })
+      .validTo(realTimeNow + 180000)
+      .validFrom(realTimeNow)
+      .complete();
 
-    return new Response(JSON.stringify({ 
-      message: `Successful submission with hash ${answer.sha}`,
-      tx_hash
-    }), { status: 200 })
+    const signed = await tx.sign().complete()
+
+    const tx_hash = await Promise.race([
+      signed.submit(),
+      delay(2000)
+    ])
+
+    if (tx_hash) {
+      console.log(`Successful submission with tx hash ${tx_hash}`)
+      return new Response(JSON.stringify({
+        message: `Successful submission with hash ${answer.sha}`,
+        tx_hash
+      }), { status: 200 })
+    } else {
+      if (retries < 3) {
+        console.log(`Submission timed out. Retry ${retries}.`)
+        return handleSubmitRetrying(answer, retries + 1)
+      } else {
+        console.log(`Gave up on submitting sha ${answer.sha}`)
+      }
+    }
+
   } catch (e) {
     console.log(`Failed submission! Detail: ${JSON.stringify(e)}`)
-    console.log(e)
-    return new Response(JSON.stringify({
-      message: `Could not submit hash ${answer.sha}`,
-    }), { status: 500 })
   }
 
-
-
+  return new Response(JSON.stringify({
+    message: `Could not submit hash ${answer.sha}`,
+  }), { status: 500 })
 }
 
 console.log("Submission server listening on 22123")
 for await (const conn of Deno.listen({ port: 22123 })) {
   (async () => {
     for await (const { request, respondWith } of Deno.serveHttp(conn)) {
-     
-      respondWith( handler(request))
+
+      respondWith(handler(request))
     }
   })()
 }
@@ -151,7 +186,7 @@ export function calculateInterlink(
   while (
     b_half.leadingZeros < a.leadingZeros ||
     b_half.leadingZeros == a.leadingZeros &&
-      b_half.difficulty_number > a.difficulty_number
+    b_half.difficulty_number > a.difficulty_number
   ) {
     if (currentIndex < interlink.length) {
       interlink[currentIndex] = currentHash;

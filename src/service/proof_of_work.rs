@@ -123,7 +123,6 @@ pub async fn submit_proof_of_work(
                 return false;
             }
 
-            println!("JUST VERIFYING THE NONCE NOW...");
             return verify_nonce(nonce_bytes, miner_id, pool_id)
         })
         .collect();

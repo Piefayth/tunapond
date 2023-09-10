@@ -1,5 +1,5 @@
 use actix_web::{ get, web, Responder, HttpResponse};
-use chrono::NaiveDateTime;
+use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
@@ -9,7 +9,7 @@ use crate::{common::GenericMessageResponse, model::proof_of_work::{self, ProofOf
 struct HashrateRequest {
     miner_id: Option<i64>,
     start_time: NaiveDateTime,
-    end_time: NaiveDateTime
+    end_time: Option<NaiveDateTime>
 }
 
 #[derive(Debug, Serialize)]
@@ -22,8 +22,11 @@ async fn hashrate(
     pool: web::Data<SqlitePool>,
     query: web::Query<HashrateRequest>,
 ) -> impl Responder  {
+    let now = Utc::now().naive_utc();
+    let end_time = query.end_time.unwrap_or(now);
+
     let maybe_pow = proof_of_work::get_by_time_range(
-        &pool, query.miner_id, query.start_time, query.end_time
+        &pool, query.miner_id, query.start_time, end_time
     ).await;
 
     let Ok(pow) = maybe_pow else {
@@ -36,7 +39,7 @@ async fn hashrate(
     
     HttpResponse::Ok().json(
         HashrateResponse { 
-            estimated_hash_rate: estimate_hashrate(&pow, query.start_time, query.end_time)
+            estimated_hash_rate: estimate_hashrate(&pow, query.start_time, end_time)
         }
     )
 }

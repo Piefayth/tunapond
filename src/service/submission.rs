@@ -1,11 +1,13 @@
+use std::sync::Arc;
+
 use cardano_multiplatform_lib::{plutus::{PlutusData, PlutusList, ConstrPlutusData, Costmdls, Language, ExUnitPrices, self}, ledger::{common::{value::{Int, BigInt, BigNum, Value}, utxo::TransactionUnspentOutput}, alonzo::{fees::LinearFee, self}}, builders::tx_builder::{TransactionBuilderConfigBuilder, TransactionBuilder}, UnitInterval, chain_crypto::Ed25519, crypto::{PrivateKey, Bip32PrivateKey, TransactionHash}, address::{StakeCredential, Address}, TransactionInput, error::JsError, TransactionOutput, genesis::network_info::plutus_alonzo_cost_models};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::{ service::proof_of_work::get_difficulty, model::datum_submission};
+use crate::{ service::proof_of_work::get_difficulty, model::datum_submission::{self, accept, reject, get_unconfirmed}};
 
-use super::block::Block;
+use super::block::{Block, BlockService, KupoTransaction};
 
 #[derive(Debug)]
 pub enum SubmissionError {
@@ -67,7 +69,7 @@ pub async fn submit(
     nonce: &[u8]
 ) -> Result<(), SubmissionError> {
     let new_diff_data = get_difficulty(sha);
-    println!("THERE WAS A SUBMISSION");
+
     let submission = DenoSubmission {
         nonce: hex::encode(nonce),
         sha: hex::encode(sha),
@@ -75,9 +77,9 @@ pub async fn submit(
         new_difficulty: new_diff_data.difficulty_number as i64,
         new_zeroes: new_diff_data.leading_zeroes as i64,
     };
-    
+
     let response: DenoSubmissionResponse = reqwest::Client::new()
-        .post("http://localhost:22123")
+        .post("http://localhost:22123/submit")
         .json(&submission)
         .send()
         .await?
@@ -86,16 +88,70 @@ pub async fn submit(
 
     log::info!("Submitted datum on chain in tx_hash {}", &response.tx_hash);
 
-    let hm = datum_submission::create(
+    datum_submission::create(
         pool, response.tx_hash, hex::encode(sha)
-    ).await;
-
-    match hm {
-        Ok(_) => {},
-        Err(e) => println!("{:?}", e),
-    }
+    ).await?;
 
     Ok(())
+}
+
+pub async fn submission_updater(pool: SqlitePool) {
+    let kupo_url = std::env::var("KUPO_URL").expect("Cannot instantiate BlockService because KUPO_URL is not set.");
+    let interval = 60;
+
+    let client = reqwest::Client::new();  // Assuming you're using the reqwest crate
+
+    loop {
+        
+        let unconfirmed_datums = get_unconfirmed(&pool).await;
+        
+        let Ok(unconfirmed) = unconfirmed_datums else {
+            log::error!("Submission updater could not fetch unconfirmed.");
+            return;
+        };
+
+        if !unconfirmed.is_empty() {
+            for datum in unconfirmed {
+                let url = format!("{}/matches/*@{}", kupo_url, datum.transaction_hash);
+
+                let resp = client.get(&url).send().await;
+
+                let Ok(r) = resp else {
+                    log::warn!("Failed to fetch matches for transaction_id: {}", datum.transaction_hash);
+                    continue;
+                };
+                
+                let response_result: Result<Vec<KupoTransaction>, reqwest::Error> = r.json().await;
+                let Ok(kupo_transactions) = response_result else {
+                    log::error!("Failed to parse kupo transaction! Got {:?}", response_result);
+                    continue;
+                };
+
+                let tx_hash = datum.transaction_hash.clone();
+                if !kupo_transactions.is_empty() {
+                    let result = accept(&pool, vec![datum]).await;
+                    log::info!("Permanently accepted datum at transaction {}.", tx_hash);
+                    let Ok(_) = result else {
+                        log::error!("Failed to accept datum with transaction_id: {}", tx_hash);
+                        return;
+                    };
+                } else {
+                    let now = Utc::now().naive_utc();
+                    let age = now.signed_duration_since(datum.created_at).num_minutes();
+
+                    if age > 2 {
+                        let result = reject(&pool, vec![datum]).await;
+                        let Ok(_) = result else {
+                            log::error!("Failed to reject datum with transaction_id: {}", tx_hash);
+                            return;
+                        };
+                    }
+                }
+            }
+        }
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(interval)).await;
+    }
 }
 
 // Below here is a code graveyard
