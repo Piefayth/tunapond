@@ -82,7 +82,7 @@ async function handler(request: Request): Promise<Response> {
     interlink,
   ]);
   const outDat = Data.to(postDatum);
-
+  console.log(postDatum)
   const mintTokens = { [validatorHash + fromText("TUNA")]: 5000000000n }
   const masterToken = { [validatorHash + fromText("lord tuna")]: 1n }
   try {

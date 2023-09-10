@@ -65,12 +65,7 @@ async fn work(
         }
     };
 
-    let pool_id: u8 = std::env::var("POOL_ID")
-        .expect("POOL_ID must be set")
-        .parse()
-        .expect("POOL_ID must be a valid number");
-    
-    let nonce = generate_nonce(miner_id, pool_id);
+    let nonce = generate_nonce(miner_id);
 
     let Ok(current_block) = block_service.get_latest() else {
         return HttpResponse::InternalServerError().json(GenericMessageResponse {
@@ -84,7 +79,12 @@ async fn work(
     })
 }
 
-fn generate_nonce(miner_id: i64, pool_id: u8) -> String {
+pub fn generate_nonce(miner_id: i64) -> String {
+    let pool_id: u8 = std::env::var("POOL_ID")
+        .expect("POOL_ID must be set")
+        .parse()
+        .expect("POOL_ID must be a valid number");
+
     let mut rng = rand::thread_rng();
 
     let mut nonce = vec![0u8; 16]; // 16 bytes in total

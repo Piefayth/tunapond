@@ -1,6 +1,7 @@
 use crate::model::proof_of_work::ProofOfWork;
 use crate::model::proof_of_work::{self};
 use crate::routes::submit::Submission;
+use crate::routes::work::generate_nonce;
 use cardano_multiplatform_lib::error::JsError;
 use cardano_multiplatform_lib::ledger::common::value::BigInt;
 use cardano_multiplatform_lib::ledger::common::value::BigNum;
@@ -53,6 +54,7 @@ impl From<BlockServiceError> for SubmitProofOfWorkError {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubmitProofOfWorkResponse {
     num_accepted: u64,
+    nonce: String,
     working_block: ReadableBlock,
 }
 
@@ -121,14 +123,16 @@ pub async fn submit_proof_of_work(
                 return false;
             }
 
+            println!("JUST VERIFYING THE NONCE NOW...");
             return verify_nonce(nonce_bytes, miner_id, pool_id)
         })
         .collect();
 
+        
     let num_accepted = proof_of_work::create(
         pool,
-        current_block.block_number,
         miner_id,
+        current_block.block_number,
         &valid_samples,
     )
     .await?;
@@ -167,6 +171,7 @@ pub async fn submit_proof_of_work(
     Ok(SubmitProofOfWorkResponse {
         num_accepted: num_accepted,
         working_block: current_block.into(),
+        nonce: generate_nonce(miner_id)
     })
 }
 
@@ -219,30 +224,6 @@ pub async fn get_proof_of_work(
     miner_id: i64,
 ) -> Result<Vec<ProofOfWork>, sqlx::Error> {
     proof_of_work::get(pool, miner_id).await
-}
-
-fn estimate_hashes_for_difficulty(proofs: usize, zeros: u32) -> f64 {
-    let p_n: f64 = 16f64.powi(-(zeros as i32));
-    (proofs as f64) / p_n
-}
-
-/// Given a vec of ProofOfWork structs and a time range, calculate the hashrate.
-fn estimate_hashrate(
-    proofs: &Vec<ProofOfWork>,
-    start_time: NaiveDateTime,
-    end_time: NaiveDateTime,
-) -> f64 {
-    let duration = end_time - start_time;
-
-    let valid_proofs = proofs
-        .iter()
-        .filter(|p| p.created_at >= start_time && p.created_at <= end_time)
-        .count();
-    let zeros = 8; // TODO: this value comes from somewhere else? this is "min_zeroes" really...
-
-    let total_hashes = estimate_hashes_for_difficulty(valid_proofs, zeros);
-
-    total_hashes / duration.num_seconds() as f64
 }
 
 // TODO: Why are these u128s?

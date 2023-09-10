@@ -33,15 +33,50 @@ pub async fn create(
         .await {
             Ok(_) => success_count += 1,
             Err(e) => {
-                log::debug!("Rejected a sha due to {:?}", e);
+                log::warn!("Rejected a sha due to {:?}", e);
             }
         }
     }
 
-    // Commit the transaction regardless of individual failures.
     tx.commit().await?;
 
     Ok(success_count) // Returns the number of successful insertions.
+}
+
+pub async fn get_by_time_range(
+    pool: &SqlitePool,
+    miner_id: Option<i64>,
+    start_time: NaiveDateTime,
+    end_time: NaiveDateTime,
+) -> Result<Vec<ProofOfWork>, sqlx::Error> {
+    match miner_id {
+        Some(id) => {
+            sqlx::query_as!(
+                ProofOfWork,
+                r#"
+                SELECT miner_id, block_number, sha, nonce, created_at
+                FROM proof_of_work
+                WHERE miner_id = ? AND created_at BETWEEN ? AND ?
+                "#,
+                id, start_time, end_time
+            )
+            .fetch_all(pool)
+            .await
+        }
+        None => {
+            sqlx::query_as!(
+                ProofOfWork,
+                r#"
+                SELECT miner_id, block_number, sha, nonce, created_at
+                FROM proof_of_work
+                WHERE created_at BETWEEN ? AND ?
+                "#,
+                start_time, end_time
+            )
+            .fetch_all(pool)
+            .await
+        }
+    }
 }
 
 pub async fn get(

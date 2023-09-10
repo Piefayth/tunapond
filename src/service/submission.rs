@@ -45,7 +45,7 @@ const PADDING: u64 = 16;
 pub const ON_CHAIN_HALF_TIME_RANGE: u64 = 90;
 
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct DenoSubmission {
     nonce: String,
     sha: String,
@@ -67,7 +67,7 @@ pub async fn submit(
     nonce: &[u8]
 ) -> Result<(), SubmissionError> {
     let new_diff_data = get_difficulty(sha);
-
+    println!("THERE WAS A SUBMISSION");
     let submission = DenoSubmission {
         nonce: hex::encode(nonce),
         sha: hex::encode(sha),
@@ -86,9 +86,14 @@ pub async fn submit(
 
     log::info!("Submitted datum on chain in tx_hash {}", &response.tx_hash);
 
-    datum_submission::create(
+    let hm = datum_submission::create(
         pool, response.tx_hash, hex::encode(sha)
-    ).await?;
+    ).await;
+
+    match hm {
+        Ok(_) => {},
+        Err(e) => println!("{:?}", e),
+    }
 
     Ok(())
 }
