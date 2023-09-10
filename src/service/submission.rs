@@ -1,13 +1,11 @@
-use std::sync::Arc;
-
-use cardano_multiplatform_lib::{plutus::{PlutusData, PlutusList, ConstrPlutusData, Costmdls, Language, ExUnitPrices, self}, ledger::{common::{value::{Int, BigInt, BigNum, Value}, utxo::TransactionUnspentOutput}, alonzo::{fees::LinearFee, self}}, builders::tx_builder::{TransactionBuilderConfigBuilder, TransactionBuilder}, UnitInterval, chain_crypto::Ed25519, crypto::{PrivateKey, Bip32PrivateKey, TransactionHash}, address::{StakeCredential, Address}, TransactionInput, error::JsError, TransactionOutput, genesis::network_info::plutus_alonzo_cost_models};
+use cardano_multiplatform_lib::{plutus::{PlutusData, PlutusList, ConstrPlutusData, ExUnitPrices, self}, ledger::{common::{value::{Int, BigInt, BigNum, Value}, utxo::TransactionUnspentOutput}, alonzo::{fees::LinearFee, self}}, builders::tx_builder::{TransactionBuilderConfigBuilder, TransactionBuilder}, UnitInterval, chain_crypto::Ed25519, crypto::{PrivateKey, Bip32PrivateKey, TransactionHash}, address::{StakeCredential, Address}, TransactionInput, error::JsError, TransactionOutput, genesis::network_info::plutus_alonzo_cost_models};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
 use crate::{ service::proof_of_work::get_difficulty, model::datum_submission::{self, accept, reject, get_unconfirmed}};
 
-use super::block::{Block, BlockService, KupoTransaction};
+use super::block::{Block, KupoTransaction};
 
 #[derive(Debug)]
 pub enum SubmissionError {

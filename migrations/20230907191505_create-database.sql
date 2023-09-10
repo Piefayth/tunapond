@@ -9,6 +9,7 @@ CREATE TABLE proof_of_work(
     sha TEXT CHECK(length(sha) = 64) NOT NULL,   
     nonce TEXT CHECK(length(nonce) = 32) NOT NULL,
     created_at DATETIME NOT NULL,
+    paid BOOLEAN,
     PRIMARY KEY(sha),
     FOREIGN KEY(miner_id) REFERENCES miners(id)
 );
