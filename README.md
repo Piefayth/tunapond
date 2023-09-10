@@ -13,7 +13,7 @@ A work in progress mining pool for Fortuna.
 ## API
 
 ### Work
-`GET /work`
+`GET /work?address={}`
 
 Returns
 
@@ -66,7 +66,7 @@ If `block_number` has changed since the last time the client has submitted or re
 ```json
 {
 	"num_accepted": 2,
-	"session_id": 43,
+	"nonce": "249a83749bc3749df32",
 	"working_block": {
 		"block_number": 27523,
 		"current_hash": "0000000000021f0f792e7694c6d7ccbb07e062727ec6850765094c61927f5399",
@@ -87,6 +87,4 @@ If `block_number` has changed since the last time the client has submitted or re
 `GET /hashrate`
 
 #### Request
-`/hashrate?address={}
-
-TODO!
+`/hashrate?address={}&start_time={}&end_time={}
