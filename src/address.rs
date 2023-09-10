@@ -18,7 +18,6 @@ impl actix_web::error::ResponseError for AddressParseError {
     }
 }
 
-
 pub fn pkh_from_address(address: &str) -> Result<String, AddressParseError> {
     let c_address = C::address::Address::from_bech32(address).map_err(address_error("Input address should have been in bech32 format."))?;
     let keyhash = c_address.payment_cred().or_else(|| c_address.staking_cred())

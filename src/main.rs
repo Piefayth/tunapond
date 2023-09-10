@@ -7,11 +7,11 @@ use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use service::block::{BlockService, block_updater};
 use sqlx::{SqlitePool};
 
-mod signature_verifier;
 mod address;
 mod model;
 mod service;
 mod routes;
+mod common;
 
 #[get("/health")]
 async fn health(_: String) -> impl Responder {
@@ -52,8 +52,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(Data::new(pool.clone()))
             .app_data(Data::new(block_service.clone()))
             .service(health)
-            .service(routes::register::register)
-            .service(routes::deregister::deregister)
+            .service(routes::work::work)
             .service(routes::submit::submit)
             .service(routes::hashrate::hashrate)
     })

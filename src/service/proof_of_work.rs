@@ -1,34 +1,29 @@
-use std::sync::Arc;
+use crate::model::proof_of_work::ProofOfWork;
+use crate::model::proof_of_work::{self};
+use crate::routes::submit::Submission;
 use cardano_multiplatform_lib::error::JsError;
 use cardano_multiplatform_lib::ledger::common::value::BigInt;
 use cardano_multiplatform_lib::ledger::common::value::BigNum;
 use cardano_multiplatform_lib::plutus::ConstrPlutusData;
 use cardano_multiplatform_lib::plutus::PlutusData;
 use cardano_multiplatform_lib::plutus::PlutusList;
-use cardano_multiplatform_lib::plutus::encode_json_str_to_plutus_datum;
-use sha2::{Sha256, Digest};
 use chrono::NaiveDateTime;
-use chrono::Duration;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use crate::model::mining_session;
-use crate::model::proof_of_work::ProofOfWork;
-use crate::model::proof_of_work::{self};
-use crate::model::mining_session::get_latest;
-use crate::routes::submit::Submission;
+use std::sync::Arc;
 
 use super::block::{BlockService, BlockServiceError, ReadableBlock};
-use super::submission::SubmissionError;
 use super::submission::submit;
+use super::submission::SubmissionError;
 
 #[derive(Debug)]
 pub enum SubmitProofOfWorkError {
     DatabaseError(sqlx::Error),
-    NoCurrentSession,
     InvalidTargetState,
     BlockServiceFailure(BlockServiceError),
     PlutusParseError(JsError),
-    SubmissionError(SubmissionError)
+    SubmissionError(SubmissionError),
 }
 
 impl From<SubmissionError> for SubmitProofOfWorkError {
@@ -36,7 +31,6 @@ impl From<SubmissionError> for SubmitProofOfWorkError {
         SubmitProofOfWorkError::SubmissionError(err)
     }
 }
-
 
 impl From<sqlx::Error> for SubmitProofOfWorkError {
     fn from(err: sqlx::Error) -> Self {
@@ -59,7 +53,6 @@ impl From<BlockServiceError> for SubmitProofOfWorkError {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubmitProofOfWorkResponse {
     num_accepted: u64,
-    session_id: i64,
     working_block: ReadableBlock,
 }
 
@@ -68,120 +61,113 @@ const SAMPLING_DIFFICULTY: u8 = 8;
 pub async fn submit_proof_of_work(
     pool: &SqlitePool,
     block_service: &Arc<BlockService>,
-    pkh: String,
+    miner_id: i64,
     submission: &Submission,
 ) -> Result<SubmitProofOfWorkResponse, SubmitProofOfWorkError> {
-    let maybe_latest_session = get_latest(pool, &pkh).await?;
+    let pool_id: u8 = std::env::var("POOL_ID")
+        .expect("POOL_ID must be set")
+        .parse()
+        .expect("POOL_ID must be a valid number");
 
-    match maybe_latest_session {
-        Some(latest_session) => {
-            // TODO: Some database errors (like primary key collisions) are a result of malicious miner
-                // behavior. Depending on the error, miners may need removed from the pool...
-            
-            // TODO: Check that the miner is mining the block their session is assigned. Reject hashes that aren't.
-                // Also, update their session assignment if the current block is new
+    // TODO: Some database errors (like primary key collisions) are a result of malicious miner
+    // behavior. Depending on the error, miners may need removed from the pool...
 
+    let current_block = block_service.get_latest()?;
+    let default_nonce: [u8; 16] = [0; 16];
 
-            let current_block = block_service.get_latest()?;
-            let default_nonce: [u8; 16] = [0; 16];
+    let mut target_state_fields = PlutusList::new();
 
-            let mut target_state_fields = PlutusList::new();
+    let nonce_field = PlutusData::new_bytes(default_nonce.to_vec());
+    let block_number_field = PlutusData::new_integer(&BigInt::from(current_block.block_number));
+    let current_hash_field = PlutusData::new_bytes(current_block.current_hash.clone());
+    let leading_zeroes_field = PlutusData::new_integer(&BigInt::from(current_block.leading_zeroes));
+    let difficulty_number_field =
+        PlutusData::new_integer(&BigInt::from(current_block.difficulty_number));
+    let epoch_time_field = PlutusData::new_integer(&BigInt::from(current_block.epoch_time));
 
-            let nonce_field = PlutusData::new_bytes(default_nonce.to_vec());
-            let block_number_field = PlutusData::new_integer(&BigInt::from(current_block.block_number));
-            let current_hash_field = PlutusData::new_bytes(current_block.current_hash.clone());
-            let leading_zeroes_field = PlutusData::new_integer(&BigInt::from(current_block.leading_zeroes));
-            let difficulty_number_field = PlutusData::new_integer(&BigInt::from(current_block.difficulty_number));
-            let epoch_time_field = PlutusData::new_integer(&BigInt::from(current_block.epoch_time));
+    target_state_fields.add(&nonce_field);
+    target_state_fields.add(&block_number_field);
+    target_state_fields.add(&current_hash_field);
+    target_state_fields.add(&leading_zeroes_field);
+    target_state_fields.add(&difficulty_number_field);
+    target_state_fields.add(&epoch_time_field);
 
-            target_state_fields.add(&nonce_field);
-            target_state_fields.add(&block_number_field);
-            target_state_fields.add(&current_hash_field);
-            target_state_fields.add(&leading_zeroes_field);
-            target_state_fields.add(&difficulty_number_field);
-            target_state_fields.add(&epoch_time_field);
+    let target_state = PlutusData::new_constr_plutus_data(&ConstrPlutusData::new(
+        &BigNum::from_str("0").unwrap(),
+        &target_state_fields,
+    ));
 
-            let target_state = PlutusData::new_constr_plutus_data(
-                &ConstrPlutusData::new(&BigNum::from_str("0").unwrap(), &target_state_fields)
-            );
+    let mut target_state_bytes = target_state.to_bytes();
 
-            let mut target_state_bytes = target_state.to_bytes();
+    let valid_samples: Vec<_> = submission
+        .entries
+        .iter()
+        .filter(|&entry| {
+            let sha_binding = hex::decode(&entry.sha).unwrap_or_default();
+            let sha_bytes = sha_binding.as_slice();
+            let nonce_binding = hex::decode(&entry.nonce).unwrap_or_default();
+            let nonce_bytes = nonce_binding.as_slice();
+            let entry_difficulty = get_difficulty(sha_bytes);
 
-            let valid_samples: Vec<_> = submission.entries.iter()
-                .filter(|&entry| {
-                    let sha_binding = hex::decode(&entry.sha).unwrap_or_default();
-                    let sha_bytes = sha_binding.as_slice();
-                    let nonce_binding = hex::decode(&entry.nonce).unwrap_or_default();
-                    let nonce_bytes = nonce_binding.as_slice();
-                    let entry_difficulty = get_difficulty(sha_bytes);
-                    
-                    if entry_difficulty.leading_zeroes < SAMPLING_DIFFICULTY as u128 {
-                        return false
-                    }
-                    
-                    target_state_bytes[4..20].copy_from_slice(nonce_bytes);
-                    let hashed_data = sha256_digest_as_bytes(&target_state_bytes);
-                    let hashed_hash = sha256_digest_as_bytes(&hashed_data);
-
-                    if !hashed_hash.eq(sha_bytes){
-                        return false
-                    }
-
-                    true
-
-                })
-                .collect();
-            
-            let num_accepted = proof_of_work::create(
-                pool, 
-                latest_session.id, 
-                latest_session.currently_mining_block, 
-                &valid_samples
-            )
-            .await?;
-
-            let maybe_found_block = valid_samples.iter().find(|sample| {
-                let sha_binding = hex::decode(&sample.sha).unwrap_or_default();
-                let sha_bytes = sha_binding.as_slice();
-                let entry_difficulty = get_difficulty(sha_bytes);
-                
-                let too_many_zeroes = entry_difficulty.leading_zeroes > current_block.leading_zeroes as u128;
-                let just_enough_zeroes = entry_difficulty.leading_zeroes == current_block.leading_zeroes as u128;
-                let enough_difficulty = entry_difficulty.difficulty_number < current_block.difficulty_number as u128;
-                if too_many_zeroes || (just_enough_zeroes && enough_difficulty) {
-                    true
-                } else {
-                    false
-                }
-            });
-
-            match maybe_found_block {
-                Some(entry) => {
-                    submit(
-                        pool, 
-                        &current_block, 
-                        hex::decode(&entry.sha).unwrap_or_default().as_slice(), 
-                        hex::decode(&entry.nonce).unwrap_or_default().as_slice()
-                    ).await?;
-                },
-                None => {}
+            if entry_difficulty.leading_zeroes < SAMPLING_DIFFICULTY as u128 {
+                return false;
             }
 
+            target_state_bytes[4..20].copy_from_slice(nonce_bytes);
+            let hashed_data = sha256_digest_as_bytes(&target_state_bytes);
+            let hashed_hash = sha256_digest_as_bytes(&hashed_data);
 
+            if !hashed_hash.eq(sha_bytes) {
+                return false;
+            }
 
-            Ok(
-                SubmitProofOfWorkResponse {
-                    num_accepted: num_accepted,
-                    session_id: latest_session.id,
-                    working_block: current_block.into()
-                }
+            return verify_nonce(nonce_bytes, miner_id, pool_id)
+        })
+        .collect();
+
+    let num_accepted = proof_of_work::create(
+        pool,
+        current_block.block_number,
+        miner_id,
+        &valid_samples,
+    )
+    .await?;
+
+    let maybe_found_block = valid_samples.iter().find(|sample| {
+        let sha_binding = hex::decode(&sample.sha).unwrap_or_default();
+        let sha_bytes = sha_binding.as_slice();
+        let entry_difficulty = get_difficulty(sha_bytes);
+
+        let too_many_zeroes =
+            entry_difficulty.leading_zeroes > current_block.leading_zeroes as u128;
+        let just_enough_zeroes =
+            entry_difficulty.leading_zeroes == current_block.leading_zeroes as u128;
+        let enough_difficulty =
+            entry_difficulty.difficulty_number < current_block.difficulty_number as u128;
+        if too_many_zeroes || (just_enough_zeroes && enough_difficulty) {
+            true
+        } else {
+            false
+        }
+    });
+
+    match maybe_found_block {
+        Some(entry) => {
+            submit(
+                pool,
+                &current_block,
+                hex::decode(&entry.sha).unwrap_or_default().as_slice(),
+                hex::decode(&entry.nonce).unwrap_or_default().as_slice(),
             )
+            .await?;
         }
-        None => {
-            Err(SubmitProofOfWorkError::NoCurrentSession)
-        }
+        None => {}
     }
 
+    Ok(SubmitProofOfWorkResponse {
+        num_accepted: num_accepted,
+        working_block: current_block.into(),
+    })
 }
 
 fn sha256_digest_as_bytes(data: &[u8]) -> [u8; 32] {
@@ -192,10 +178,30 @@ fn sha256_digest_as_bytes(data: &[u8]) -> [u8; 32] {
     arr
 }
 
+fn verify_nonce(nonce_bytes: &[u8], miner_id: i64, pool_id: u8) -> bool {
+    if nonce_bytes.len() != 16 {
+        return false;
+    }
+
+    // Extract the last 4 bytes
+    let last_4_bytes = &nonce_bytes[12..16];
+
+    // Compare the first 3 bytes of the last 4 bytes to miner_id
+    if &miner_id.to_be_bytes()[..3] != &last_4_bytes[..3] {
+        return false;
+    }
+
+    // Compare the last byte to pool_id
+    if pool_id != last_4_bytes[3] {
+        return false;
+    }
+
+    true
+}
+
 #[derive(Debug)]
 pub enum GetHashrateError {
     DatabaseError(sqlx::Error),
-    SessionNotFound,
 }
 
 impl From<sqlx::Error> for GetHashrateError {
@@ -205,40 +211,15 @@ impl From<sqlx::Error> for GetHashrateError {
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct HashrateResult {
-    pub estimated_hashes_per_second: f64
-}
-
-pub async fn get_session_hashrate(
-    pool: &SqlitePool,
-    mining_session_id: i64
-) -> Result<HashrateResult, GetHashrateError>{
-    let hashes = proof_of_work::get(pool, mining_session_id).await?;
-    let session = mining_session::get_from_id(pool, mining_session_id)
-        .await?
-        .ok_or(GetHashrateError::SessionNotFound)?;
-
-    let start_time = session.start_time;
-    let end_time = match session.end_time {
-        Some(session_end_time) => session_end_time,
-        None =>  chrono::Utc::now().naive_utc()
-    };
-
-    let hashrate = estimate_hashrate(&hashes, start_time, end_time);
-
-    Ok(
-        HashrateResult {
-            estimated_hashes_per_second: hashrate
-        }
-    )
+    pub estimated_hashes_per_second: f64,
 }
 
 pub async fn get_proof_of_work(
     pool: &SqlitePool,
-    mining_session_id: i64,
+    miner_id: i64,
 ) -> Result<Vec<ProofOfWork>, sqlx::Error> {
-    proof_of_work::get(pool, mining_session_id).await
+    proof_of_work::get(pool, miner_id).await
 }
-
 
 fn estimate_hashes_for_difficulty(proofs: usize, zeros: u32) -> f64 {
     let p_n: f64 = 16f64.powi(-(zeros as i32));
@@ -246,14 +227,21 @@ fn estimate_hashes_for_difficulty(proofs: usize, zeros: u32) -> f64 {
 }
 
 /// Given a vec of ProofOfWork structs and a time range, calculate the hashrate.
-fn estimate_hashrate(proofs: &Vec<ProofOfWork>, start_time: NaiveDateTime, end_time: NaiveDateTime) -> f64 {
+fn estimate_hashrate(
+    proofs: &Vec<ProofOfWork>,
+    start_time: NaiveDateTime,
+    end_time: NaiveDateTime,
+) -> f64 {
     let duration = end_time - start_time;
-    
-    let valid_proofs = proofs.iter().filter(|p| p.created_at >= start_time && p.created_at <= end_time).count();
-    let zeros = 8; // TODO: this value comes from somewhere else? this is "min_zeroes" really... 
-    
+
+    let valid_proofs = proofs
+        .iter()
+        .filter(|p| p.created_at >= start_time && p.created_at <= end_time)
+        .count();
+    let zeros = 8; // TODO: this value comes from somewhere else? this is "min_zeroes" really...
+
     let total_hashes = estimate_hashes_for_difficulty(valid_proofs, zeros);
-    
+
     total_hashes / duration.num_seconds() as f64
 }
 
@@ -261,12 +249,12 @@ fn estimate_hashrate(proofs: &Vec<ProofOfWork>, start_time: NaiveDateTime, end_t
 #[derive(Default)]
 pub struct Difficulty {
     pub leading_zeroes: u128,
-    pub difficulty_number: u128
+    pub difficulty_number: u128,
 }
 
 pub fn get_difficulty(hash: &[u8]) -> Difficulty {
     if hash.len() != 32 {
-        return Difficulty::default()
+        return Difficulty::default();
     }
 
     let mut leading_zeroes = 0;
@@ -279,15 +267,24 @@ pub fn get_difficulty(hash: &[u8]) -> Difficulty {
                 difficulty_number += (chr as u128) * 4096;
                 difficulty_number += (hash[indx + 1] as u128) * 16;
                 difficulty_number += (hash[indx + 2] as u128) / 16;
-                return Difficulty { leading_zeroes, difficulty_number }
+                return Difficulty {
+                    leading_zeroes,
+                    difficulty_number,
+                };
             } else {
                 difficulty_number += (chr as u128) * 256;
                 difficulty_number += hash[indx + 1] as u128;
-                return Difficulty { leading_zeroes, difficulty_number }
+                return Difficulty {
+                    leading_zeroes,
+                    difficulty_number,
+                };
             }
         } else {
             leading_zeroes += 2;
         }
     }
-    return Difficulty { leading_zeroes: 32, difficulty_number: 0 }
+    return Difficulty {
+        leading_zeroes: 32,
+        difficulty_number: 0,
+    };
 }

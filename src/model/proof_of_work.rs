@@ -4,7 +4,7 @@ use chrono::NaiveDateTime;
 use crate::routes::submit::SubmissionEntry;
 
 pub struct ProofOfWork {
-    pub mining_session_id: i64,
+    pub miner_id: i64,
     pub block_number: i64,
     pub sha: String,
     pub nonce: String,
@@ -13,7 +13,7 @@ pub struct ProofOfWork {
 
 pub async fn create(
     pool: &SqlitePool,
-    session_id: i64,
+    miner_id: i64,
     block_number: i64,
     new_pows: &Vec<&SubmissionEntry>,
 ) -> Result<u64, sqlx::Error> {
@@ -24,10 +24,10 @@ pub async fn create(
         match sqlx::query!(
             r#"
             INSERT INTO proof_of_work
-            (mining_session_id, block_number, sha, nonce, created_at)
+            (miner_id, block_number, sha, nonce, created_at)
             VALUES (?, ?, ?, ?, datetime('now'))
             "#,
-            session_id, block_number, new_pow.sha, new_pow.nonce
+            miner_id, block_number, new_pow.sha, new_pow.nonce
         )
         .execute(tx.as_mut())
         .await {
@@ -46,16 +46,16 @@ pub async fn create(
 
 pub async fn get(
     pool: &SqlitePool,
-    mining_session_id: i64,
+    miner_id: i64,
 ) -> Result<Vec<ProofOfWork>, sqlx::Error> {
     sqlx::query_as!(
         ProofOfWork,
         r#"
-        SELECT mining_session_id, block_number, sha, nonce, created_at
+        SELECT miner_id, block_number, sha, nonce, created_at
         FROM proof_of_work
-        WHERE mining_session_id = ?
+        WHERE miner_id = ?
         "#,
-        mining_session_id
+        miner_id
     )
     .fetch_all(pool)
     .await

@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use actix_web::{ post, web, HttpResponse, Responder, ResponseError};
+use actix_web::{ post, web, HttpResponse, Responder};
 use serde::{Serialize, Deserialize};
 use sqlx::SqlitePool;
-
-use crate::{routes::common::GenericMessageResponse, address, service::{proof_of_work::{submit_proof_of_work, SubmitProofOfWorkError, SubmitProofOfWorkResponse}, block::BlockService}};
+use crate::common::GenericMessageResponse;
+use crate::{address, service::{proof_of_work::{submit_proof_of_work, SubmitProofOfWorkError, SubmitProofOfWorkResponse}, block::BlockService}, model::miner::get_miner_by_pkh};
 
 #[derive(Serialize, Deserialize)]
 pub struct Submission {
@@ -34,7 +34,24 @@ async fn submit(
         )
     };
     
-    let result = submit_proof_of_work(&pool, &block_service, pkh, &submission).await;
+    let maybe_maybe_miner = get_miner_by_pkh(&pool, &pkh).await;
+    let Ok(maybe_miner) = maybe_maybe_miner else {
+        return HttpResponse::NotFound().json(
+            GenericMessageResponse { 
+                message: format!("Cannot validate nonce for unseen miner. Please get some /work!")
+            }
+        )
+    };
+
+    let Some(miner) = maybe_miner else {
+        return HttpResponse::NotFound().json(
+            GenericMessageResponse { 
+                message: format!("Cannot validate nonce for unseen miner. Please get some /work!")
+            }
+        )
+    };
+
+    let result = submit_proof_of_work(&pool, &block_service, miner.id, &submission).await;
 
     match result {
         Ok(submission_response) => {
@@ -46,13 +63,6 @@ async fn submit(
                     HttpResponse::InternalServerError().json(
                         GenericMessageResponse { 
                             message: String::from("Unexpected database error.")
-                        }
-                    )
-                },
-                SubmitProofOfWorkError::NoCurrentSession => {
-                    HttpResponse::BadRequest().json(
-                        GenericMessageResponse { 
-                            message: format!("No current session found for {}", &submission.address)
                         }
                     )
                 },
