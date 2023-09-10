@@ -76,6 +76,13 @@ async fn submit(
                             message: format!("Could not verify submission - unable to create a valid target state.")
                         }
                     )
+                },
+                SubmitProofOfWorkError::SubmissionError(_) => {
+                    HttpResponse::InternalServerError().json(
+                        GenericMessageResponse { 
+                            message: format!("Failed to submit a valid block!")
+                        }
+                    )
                 }
             }
         },

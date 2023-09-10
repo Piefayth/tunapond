@@ -5,7 +5,8 @@ use cardano_multiplatform_lib::plutus::{PlutusData};
 use serde::{Deserialize, Serialize};
 
 const MAX_ITEMS: usize = 10;  // For example
-const TUNA_CONTRACT_NFT_POLICY: &str = "279f842c33eed9054b9e3c70cd6a3b32298259c24b78b895cb41d91a.6c6f72642074756e61";
+const TUNA_CONTRACT_NFT_POLICY_MAINNET: &str = "279f842c33eed9054b9e3c70cd6a3b32298259c24b78b895cb41d91a.6c6f72642074756e61";
+const TUNA_CONTRACT_NFT_POLICY_PREVIEW: &str = "502fbfbdafc7ddada9c335bd1440781e5445d08bada77dc2032866a6.6c6f72642074756e61";
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ReadableBlock {
@@ -44,6 +45,8 @@ pub struct Block {
     pub current_time: u64,
     pub extra: Vec<u8>,
     pub interlink: Vec<Vec<u8>>,
+    pub output_index: i64,
+    pub transaction_id: String,
 }
 
 
@@ -56,6 +59,8 @@ struct KupoDatumResponse {
 struct KupoTransaction {
     datum_hash: String,
     value: KupoValue,
+    output_index: i64,
+    transaction_id: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -108,6 +113,12 @@ impl BlockService {
     }
 
     async fn update_history(&self) -> Result<(), BlockServiceError> {
+        let network = std::env::var("NETWORK").unwrap_or(String::from("Mainnet"));
+        let nft_policy = match &*network {
+            "Preview" => TUNA_CONTRACT_NFT_POLICY_PREVIEW,
+            _ => TUNA_CONTRACT_NFT_POLICY_MAINNET
+        };
+
         let all_contract_unspent_tx: Vec<KupoTransaction> = reqwest::get(
                 format!("{}/matches/{}?unspent", self.kupo_url, self.contract_address)
             )
@@ -117,7 +128,7 @@ impl BlockService {
         
         let most_recent_datum_tx: KupoTransaction = all_contract_unspent_tx.into_iter()
             .find(|tx| {
-                tx.value.assets.get(TUNA_CONTRACT_NFT_POLICY) == Some(&1)
+                tx.value.assets.get(nft_policy) == Some(&1)
             })
             .ok_or(BlockServiceError::NoMatchingContractTransaction)?;
 
@@ -128,7 +139,7 @@ impl BlockService {
             .await?;
         
         let default_block = Block::default();
-        let most_recent_block = block_from_datum(most_recent_datum.datum)?;
+        let most_recent_block = block_from_datum(most_recent_datum.datum, most_recent_datum_tx)?;
 
         let last_seen_block = {
             let read_history = self.history.read().map_err(|_| {
@@ -159,14 +170,28 @@ impl BlockService {
 }
 
 pub async fn block_updater(service: Arc<BlockService>) {
+    let default_interval = 20;
+    let datum_update_interval: u64 = std::env::var("DATUM_UPDATE_INTERVAL")
+        .unwrap_or_else(|_| default_interval.to_string())
+        .parse()
+        .unwrap_or(default_interval);
+
     loop {
-        let _ = service.update_history().await;
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        let update = service.update_history().await;
+        match update {
+            Ok(_) => {
+                // good
+            },
+            Err(err) => {
+                println!("Block updater error: |{:?}|", err);
+            },
+        }
+        tokio::time::sleep(tokio::time::Duration::from_secs(datum_update_interval)).await;
     }
 }
 
 
-fn block_from_datum(datum: String) -> Result<Block, BlockServiceError> {
+fn block_from_datum(datum: String, tx: KupoTransaction) -> Result<Block, BlockServiceError> {
     let hex_bytes = hex::decode(datum.as_bytes())
         .map_err(|_| {
             log::warn!("Could not decode hex from datum {}.", datum);
@@ -192,7 +217,7 @@ fn block_from_datum(datum: String) -> Result<Block, BlockServiceError> {
     let difficulty_number = typed_data.data().get(3).as_integer().unwrap().as_int().unwrap().as_i32_or_nothing().unwrap() as u16;
     let epoch_time = typed_data.data().get(4).as_integer().unwrap().as_u64().unwrap();
     let current_time = typed_data.data().get(5).as_integer().unwrap().as_u64().unwrap();
-    let extra = typed_data.data().get(6).as_bytes().unwrap();
+    let extra = typed_data.data().get(6).to_bytes();    // TODO: Handle this some other way? It could be many types
     let interlink_list = typed_data.data().get(7).as_list().unwrap();
     let mut interlink: Vec<Vec<u8>> = Vec::new();
     
@@ -206,12 +231,14 @@ fn block_from_datum(datum: String) -> Result<Block, BlockServiceError> {
     let block = Block {
         block_number,
         current_hash,
-        leading_zeroes,
+        leading_zeroes: leading_zeroes,
         difficulty_number,
         epoch_time: epoch_time.into(),  
         current_time: current_time.into(), 
         extra,
-        interlink
+        interlink,
+        transaction_id: tx.transaction_id,
+        output_index: tx.output_index
     };
 
     Ok(block)

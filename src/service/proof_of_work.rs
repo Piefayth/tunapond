@@ -18,6 +18,8 @@ use crate::model::mining_session::get_latest;
 use crate::routes::submit::Submission;
 
 use super::block::{BlockService, BlockServiceError, ReadableBlock};
+use super::submission::SubmissionError;
+use super::submission::submit;
 
 #[derive(Debug)]
 pub enum SubmitProofOfWorkError {
@@ -25,8 +27,16 @@ pub enum SubmitProofOfWorkError {
     NoCurrentSession,
     InvalidTargetState,
     BlockServiceFailure(BlockServiceError),
-    PlutusParseError(JsError)
+    PlutusParseError(JsError),
+    SubmissionError(SubmissionError)
 }
+
+impl From<SubmissionError> for SubmitProofOfWorkError {
+    fn from(err: SubmissionError) -> Self {
+        SubmitProofOfWorkError::SubmissionError(err)
+    }
+}
+
 
 impl From<sqlx::Error> for SubmitProofOfWorkError {
     fn from(err: sqlx::Error) -> Self {
@@ -78,15 +88,11 @@ pub async fn submit_proof_of_work(
             let mut target_state_fields = PlutusList::new();
 
             let nonce_field = PlutusData::new_bytes(default_nonce.to_vec());
-            let block_number_bigint = BigInt::from_str(&format!("{}", &current_block.block_number))?;    // TODO: How to make BigInt from a number...?
-            let block_number_field = PlutusData::new_integer(&block_number_bigint);
+            let block_number_field = PlutusData::new_integer(&BigInt::from(current_block.block_number));
             let current_hash_field = PlutusData::new_bytes(current_block.current_hash.clone());
-            let leading_zeroes_bigint = BigInt::from_str(&format!("{}", &current_block.leading_zeroes))?; 
-            let leading_zeroes_field = PlutusData::new_integer(&leading_zeroes_bigint);
-            let difficulty_number_bigint = BigInt::from_str(&format!("{}", &current_block.difficulty_number))?; 
-            let difficulty_number_field = PlutusData::new_integer(&difficulty_number_bigint);
-            let epoch_time_bigint = BigInt::from_str(&format!("{}", &current_block.epoch_time))?; 
-            let epoch_time_field = PlutusData::new_integer(&epoch_time_bigint);
+            let leading_zeroes_field = PlutusData::new_integer(&BigInt::from(current_block.leading_zeroes));
+            let difficulty_number_field = PlutusData::new_integer(&BigInt::from(current_block.difficulty_number));
+            let epoch_time_field = PlutusData::new_integer(&BigInt::from(current_block.epoch_time));
 
             target_state_fields.add(&nonce_field);
             target_state_fields.add(&block_number_field);
@@ -108,7 +114,7 @@ pub async fn submit_proof_of_work(
                     let nonce_binding = hex::decode(&entry.nonce).unwrap_or_default();
                     let nonce_bytes = nonce_binding.as_slice();
                     let entry_difficulty = get_difficulty(sha_bytes);
-
+                    
                     if entry_difficulty.leading_zeroes < SAMPLING_DIFFICULTY as u128 {
                         return false
                     }
@@ -126,16 +132,42 @@ pub async fn submit_proof_of_work(
                 })
                 .collect();
             
-            // TODO: If any of the above samples are actual new datums, submit them on chain
-
             let num_accepted = proof_of_work::create(
                 pool, 
                 latest_session.id, 
                 latest_session.currently_mining_block, 
                 &valid_samples
             )
-            .await
-            .map_err(SubmitProofOfWorkError::from)?;
+            .await?;
+
+            let maybe_found_block = valid_samples.iter().find(|sample| {
+                let sha_binding = hex::decode(&sample.sha).unwrap_or_default();
+                let sha_bytes = sha_binding.as_slice();
+                let entry_difficulty = get_difficulty(sha_bytes);
+                
+                let too_many_zeroes = entry_difficulty.leading_zeroes > current_block.leading_zeroes as u128;
+                let just_enough_zeroes = entry_difficulty.leading_zeroes == current_block.leading_zeroes as u128;
+                let enough_difficulty = entry_difficulty.difficulty_number < current_block.difficulty_number as u128;
+                if too_many_zeroes || (just_enough_zeroes && enough_difficulty) {
+                    true
+                } else {
+                    false
+                }
+            });
+
+            match maybe_found_block {
+                Some(entry) => {
+                    submit(
+                        pool, 
+                        &current_block, 
+                        hex::decode(&entry.sha).unwrap_or_default().as_slice(), 
+                        hex::decode(&entry.nonce).unwrap_or_default().as_slice()
+                    ).await?;
+                },
+                None => {}
+            }
+
+
 
             Ok(
                 SubmitProofOfWorkResponse {

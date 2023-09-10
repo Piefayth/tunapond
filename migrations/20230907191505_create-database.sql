@@ -22,7 +22,7 @@ CREATE TABLE proof_of_work(
 );
 
 CREATE TABLE datum_submissions(
-    transaction_hash TEXT CHECK(length(transaction_hash) = 64),
+    transaction_hash TEXT CHECK(length(transaction_hash) = 64) NOT NULL,
     sha TEXT CHECK(length(sha) = 64) NOT NULL,   
     is_definitely_accepted BOOLEAN NOT NULL,
     is_definitely_rejected BOOLEAN NOT NULL,

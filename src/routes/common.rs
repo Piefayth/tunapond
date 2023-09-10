@@ -3,7 +3,7 @@ use serde::{Serialize, Deserialize};
 
 use crate::service::block::ReadableBlock;
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct GenericMessageResponse {
     pub message: String
 }

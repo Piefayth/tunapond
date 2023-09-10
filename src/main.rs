@@ -23,7 +23,7 @@ async fn main() -> std::io::Result<()> {
     if dotenv::dotenv().is_err() {
         println!(".env file not loaded. If you intended to use one, ensure it exists.");
     }
-    // TODO: Respect and utilize the NETWORK env var where appropriate.
+
     env_logger::init();
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
