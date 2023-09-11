@@ -59,15 +59,10 @@ async function handlePayment(request: Request): Promise<Response> {
 
   const address = payment.address
   const asset_paid = { [validatorHash + fromText("TUNA")]: BigInt( payment.amount) }
-  const masterTokenName = validatorHash + fromText("lord tuna")
 
   try {
     const tx = await lucid.newTx()
-      .collectFrom(poolWalletUtxos.filter(
-        // don't pay using the mining reward utxo
-          utxo => utxo.assets[masterTokenName] === undefined
-        )
-      )
+      .collectFrom(poolWalletUtxos)
       .payToAddress(address, asset_paid)
       .validTo(realTimeNow + 90000)
       .validFrom(realTimeNow)

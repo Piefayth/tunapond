@@ -176,6 +176,8 @@ pub async fn payment_updater(pool: SqlitePool) {
         .parse()
         .unwrap_or(default_interval);
 
+    log::info!("Trying to create payments");
+
     loop {
         let oldest_unverified = get_oldest_unverified_payment(&pool).await;
 
@@ -192,7 +194,7 @@ pub async fn payment_updater(pool: SqlitePool) {
             }
         }
 
-        log::info!("Trying to create payments");
+
         let _ = create_payments(&pool).await;
         tokio::time::sleep(tokio::time::Duration::from_secs(payment_update_interval)).await;
     }
