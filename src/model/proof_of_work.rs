@@ -3,6 +3,7 @@ use chrono::NaiveDateTime;
 
 use crate::routes::submit::SubmissionEntry;
 
+#[derive(Clone)]
 pub struct ProofOfWork {
     pub miner_id: i64,
     pub block_number: i64,
@@ -24,8 +25,8 @@ pub async fn create(
         match sqlx::query!(
             r#"
             INSERT INTO proof_of_work
-            (miner_id, block_number, sha, nonce, created_at, paid)
-            VALUES (?, ?, ?, ?, datetime('now'), false)
+            (miner_id, block_number, sha, nonce, created_at)
+            VALUES (?, ?, ?, ?, datetime('now'))
             "#,
             miner_id, block_number, new_pow.sha, new_pow.nonce
         )
@@ -41,36 +42,6 @@ pub async fn create(
     tx.commit().await?;
 
     Ok(success_count) // Returns the number of successful insertions.
-}
-
-pub async fn mark_paid(
-    pool: &SqlitePool,
-    shas: &Vec<String>,
-) -> Result<u64, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let mut success_count = 0;
-
-    for sha in shas.iter() {
-        match sqlx::query!(
-            r#"
-            UPDATE proof_of_work
-            SET paid = true
-            WHERE sha = ?
-            "#,
-            sha
-        )
-        .execute(tx.as_mut())
-        .await {
-            Ok(_) => success_count += 1,
-            Err(e) => {
-                log::warn!("Failed to update sha due to {:?}", e);
-            }
-        }
-    }
-
-    tx.commit().await?;
-
-    Ok(success_count) // Returns the number of successful updates.
 }
 
 pub async fn get_by_time_range(

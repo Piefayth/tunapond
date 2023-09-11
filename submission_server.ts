@@ -1,6 +1,8 @@
-import { load } from "https://deno.land/std@0.201.0/dotenv/mod.ts"
-import { Constr, Data, Kupmios, Lucid, Network, fromHex, fromText, toHex } from "https://deno.land/x/lucid@0.10.1/mod.ts"
-await load({ export: true })
+import { load, loadSync } from "https://deno.land/std@0.201.0/dotenv/mod.ts"
+import { C, Constr, Data, Kupmios, Lucid, Network, fromHex, fromText, toHex } from "https://deno.land/x/lucid@0.10.1/mod.ts"
+import { Address, BaseAddress, StakeCredential } from "https://deno.land/x/lucid@0.10.1/src/core/libs/cardano_multiplatform_lib/cardano_multiplatform_lib.generated.js";
+
+loadSync({ export: true })
 
 const delay = (ms: number | undefined) =>
   new Promise((res) => setTimeout(res, ms));
@@ -36,8 +38,67 @@ async function handler(request: Request): Promise<Response> {
   }
 }
 
+type Payment = {
+  address: string,
+  amount: number
+}
+
 async function handlePayment(request: Request): Promise<Response> {
-  // todo
+  const maybe_payment = await request.json()
+  if (!maybe_payment.address || !maybe_payment.amount) {
+    return new Response(JSON.stringify({
+      message: "sent a bad payment"
+    }), { status: 400 })
+  }
+
+
+  const realTimeNow = Number((Date.now() / 1000).toFixed(0)) * 1000 - 60000;
+  const validatorHash = network === "Mainnet" ? TUNA_VALIDATOR_HASH_MAINNET : TUNA_VALIDATOR_HASH_PREVIEW
+  const poolWalletUtxos = await lucid.wallet.getUtxos()
+  const payment = maybe_payment as Payment
+
+  const address = payment.address
+  const asset_paid = { [validatorHash + fromText("TUNA")]: BigInt( payment.amount) }
+  const masterTokenName = validatorHash + fromText("lord tuna")
+
+  try {
+    const tx = await lucid.newTx()
+      .collectFrom(poolWalletUtxos.filter(
+        // don't pay using the mining reward utxo
+          utxo => utxo.assets[masterTokenName] === undefined
+        )
+      )
+      .payToAddress(address, asset_paid)
+      .validTo(realTimeNow + 90000)
+      .validFrom(realTimeNow)
+      .complete()
+
+    const signed = await tx.sign().complete()
+    const tx_hash = await Promise.race([
+      signed.submit(),
+      delay(2000)
+    ])
+    
+    if (tx_hash) {
+      console.log(`Successful payment with tx hash ${tx_hash}`)
+      return new Response(JSON.stringify({
+        message: `Successful payment with tx hash ${tx_hash}`,
+        tx_hash
+      }), { status: 200 })
+    } else {
+      return new Response(JSON.stringify({
+        message: `Could not submit payment for address ${address}`,
+      }), { status: 500 })
+    }
+  } catch (e) {
+    console.log(`Failed payment for address ${address}! Detail:`)
+    console.debug(e)
+  }
+
+  return new Response(JSON.stringify({
+    message: `Could not execute payment for address ${address}`,
+  }), { status: 500 })
+
 }
 
 async function handleSubmit(request: Request): Promise<Response> {
@@ -57,6 +118,7 @@ async function handleSubmitRetrying(answer: any, retries = 0): Promise<Response>
   const validatorHash = network === "Mainnet" ? TUNA_VALIDATOR_HASH_MAINNET : TUNA_VALIDATOR_HASH_PREVIEW
   const validatorAddress = network === "Mainnet" ? TUNA_VALIDATOR_ADDRESS_MAINNET : TUNA_VALIDATOR_ADDRESS_PREVIEW
   const validatorCode = network === "Mainnet" ? TUNA_VALIDATOR_CODE_MAINNET : TUNA_VALIDATOR_CODE_PREVIEW
+  const poolWalletAddress = await lucid.wallet.address()
   const validatorUTXOs = await lucid.utxosAt(validatorAddress);
   const validatorOutRef = validatorUTXOs.find(
     (u) => u.assets[validatorHash + fromText("lord tuna")],
@@ -120,6 +182,10 @@ async function handleSubmitRetrying(answer: any, retries = 0): Promise<Response>
         { inline: outDat },
         masterToken
       )
+      .payToAddress(
+        poolWalletAddress,
+        mintTokens
+      )
       .mintAssets(mintTokens, Data.to(new Constr(0, [])))
       .attachSpendingValidator({
         type: "PlutusV2",
@@ -152,7 +218,8 @@ async function handleSubmitRetrying(answer: any, retries = 0): Promise<Response>
     }
 
   } catch (e) {
-    console.log(`Failed submission! Detail: ${JSON.stringify(e)}`)
+    console.log(`Failed submission!`)
+    console.debug(e)
   }
 
   return new Response(JSON.stringify({

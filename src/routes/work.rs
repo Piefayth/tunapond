@@ -24,6 +24,7 @@ struct WorkRequest {
 #[derive(Debug, Serialize)]
 struct WorkResponse {
     nonce: String,
+    min_zeroes: u8,
     current_block: ReadableBlock,
 }
 
@@ -50,7 +51,7 @@ async fn work(
         Ok(maybe_miner) => match maybe_miner {
             Some(miner) => miner.id,
             None => {
-                let Ok(miner_id) = create_miner(&pool, pkh).await else {
+                let Ok(miner_id) = create_miner(&pool, pkh, query.address.clone()).await else {
                     return HttpResponse::InternalServerError().json(GenericMessageResponse {
                         message: format!("Could not save new miner {}", query.address),
                     });
@@ -75,6 +76,7 @@ async fn work(
 
     HttpResponse::Ok().json(WorkResponse {
         nonce,
+        min_zeroes: 8,
         current_block: current_block.into()
     })
 }

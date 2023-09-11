@@ -99,3 +99,37 @@ pub async fn get_confirmed(pool: &SqlitePool) -> Result<Vec<DatumSubmission>, sq
     .fetch_all(pool)
     .await
 }
+
+pub async fn get_unpaid_datums_oldest(pool: &SqlitePool) -> Result<Vec<DatumSubmission>, sqlx::Error> {
+    sqlx::query_as!(
+        DatumSubmission,
+        r#"
+        SELECT ds.transaction_hash, ds.sha, ds.is_definitely_accepted, 
+               ds.is_definitely_rejected, ds.created_at, pow.block_number
+        FROM datum_submissions AS ds
+        JOIN proof_of_work AS pow ON ds.sha = pow.sha
+        WHERE ds.paid_at IS NULL
+        AND ds.is_definitely_accepted = TRUE
+        ORDER BY ds.created_at ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn mark_as_paid(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>, submissions: Vec<DatumSubmission>) -> Result<(), sqlx::Error> {
+    for submission in submissions.iter() {
+        sqlx::query!(
+            r#"
+            UPDATE datum_submissions
+            SET paid_at = datetime('now')
+            WHERE transaction_hash = ?
+            "#,
+            submission.transaction_hash
+        )
+        .execute(tx.as_mut())
+        .await?;
+    }
+
+    Ok(())
+}

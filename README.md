@@ -4,19 +4,40 @@ A work in progress mining pool for Fortuna.
 
 ## How to Run
 - Copy `.env.example` to `.env`
-- Set your `KUPO_URL` in `.env`.
+- Set your environment variables as defined in `.env`.
 - `cargo install sqlx-cli`
 - `sqlx database setup`
 - `deno run --allow-all submission_server.ts`
 - `cargo run --release`
 
+
+## Kupo Matchers for preview
+
+```
+25637629.87f143f0565015a923da8f49d9c504835528c68d9a476dd0200696271e8713ac
+502fbfbdafc7ddada9c335bd1440781e5445d08bada77dc2032866a6.54554e41
+addr_test1wpgzl0aa4lramtdfcv6m69zq0q09g3ws3wk6wlwzqv5xdfsdcf2qa	# Contract address
+addr_testxxxxxxxx  # YOUR POOL WALLET
+```
+
+## How generate a pool wallet
+In `tunapond-client`
+
+The `-p` is for preview.
+
+```
+deno run --allow-all main.ts new_wallet -p
+```
+
+You will need to fund this wallet with some (t)ADA.
+
 ## API
 
 ### Work
 `GET /work?address={}`
+Query for work to do. Importantly, this provides an _assigned nonce_. At minimum, miners MUST use the final 4 bytes of this provided nonce, as they uniquely identify the user and the pool.
 
 Returns
-
 
 ```
 type Block = {
@@ -32,6 +53,7 @@ type Block = {
 
 type Work = {
     nonce: string
+	min_zeroes: number (u8)
     current_block: Block
 }
 ```
@@ -39,7 +61,7 @@ type Work = {
 ### Submit
 `POST /submit`
 
-Submit a sample of SHA hashes to the server. Currently the expectation is that all hashes with 8 zeroes and above are sent, but this is not yet enforced. There is no client distinction between "sampled" hashes that are used for measuring hashrate and true new blocks being found. This distinction is handled on the server. Any number of entries, including 0, is acceptable.
+Submit a sample of SHA hashes to the server. Currently the expectation is that all hashes with `work.min_zeroes` and above are sent. There is no client distinction between "sampled" hashes that are used for measuring hashrate and true new blocks being found. This distinction is handled on the server. Any number of entries, including 0, is acceptable.
 
 #### Request
 ```json

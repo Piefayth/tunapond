@@ -60,7 +60,7 @@ fn estimate_hashes_for_difficulty(proofs: usize, zeros: u32) -> f64 {
 }
 
 /// Given a vec of ProofOfWork structs and a time range, calculate the hashrate.
-fn estimate_hashrate(
+pub fn estimate_hashrate(
     proofs: &Vec<ProofOfWork>,
     start_time: NaiveDateTime,
     end_time: NaiveDateTime,

@@ -7,14 +7,14 @@ pub struct Miner {
 }
 
 // Function to create a new miner.
-pub async fn create_miner(pool: &SqlitePool, pkh: String) -> Result<u64, sqlx::Error> {
+pub async fn create_miner(pool: &SqlitePool, pkh: String, address: String) -> Result<u64, sqlx::Error> {
     sqlx::query!(
         r#"
         INSERT INTO miners
-        (pkh)
-        VALUES (?)
+        (pkh, address)
+        VALUES (?, ?)
         "#,
-        pkh
+        pkh, address
     )
     .execute(pool)
     .await

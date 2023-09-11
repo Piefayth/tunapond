@@ -97,7 +97,7 @@ pub async fn submission_updater(pool: SqlitePool) {
     let kupo_url = std::env::var("KUPO_URL").expect("Cannot instantiate BlockService because KUPO_URL is not set.");
     let interval = 60;
 
-    let client = reqwest::Client::new();  // Assuming you're using the reqwest crate
+    let client = reqwest::Client::new();
 
     loop {
         
