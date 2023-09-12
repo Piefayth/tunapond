@@ -81,7 +81,14 @@ pub async fn submit(
 
     let start_time = match maybe_last_paid_datum {
         Some(last_paid_datum) => {
-            last_paid_datum.confirmed_at.unwrap() // guaranteed by the underlying database query
+            let maybe_last_confirmed = last_paid_datum.confirmed_at;
+            if maybe_last_confirmed.is_some() {
+                maybe_last_confirmed.unwrap()
+            } else {
+                proof_of_work::get_oldest(pool)
+                .await
+                .unwrap().unwrap().created_at
+            }
         },
         None => {
             // if no datum has ever been paid before, start from the first proof of work
