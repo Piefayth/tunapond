@@ -6,6 +6,7 @@ use crate::routes::submit::SubmissionEntry;
 #[derive(Clone)]
 pub struct ProofOfWork {
     pub miner_id: i64,
+    pub miner_address: String,
     pub block_number: i64,
     pub sha: String,
     pub nonce: String,
@@ -55,8 +56,9 @@ pub async fn get_by_time_range(
             sqlx::query_as!(
                 ProofOfWork,
                 r#"
-                SELECT miner_id, block_number, sha, nonce, created_at
+                SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
                 FROM proof_of_work
+                JOIN miners on miner_id = miners.id
                 WHERE miner_id = ? AND created_at BETWEEN ? AND ?
                 "#,
                 id, start_time, end_time
@@ -68,8 +70,9 @@ pub async fn get_by_time_range(
             sqlx::query_as!(
                 ProofOfWork,
                 r#"
-                SELECT miner_id, block_number, sha, nonce, created_at
+                SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
                 FROM proof_of_work
+                JOIN miners on miner_id = miners.id
                 WHERE created_at BETWEEN ? AND ?
                 "#,
                 start_time, end_time
@@ -87,8 +90,9 @@ pub async fn get(
     sqlx::query_as!(
         ProofOfWork,
         r#"
-        SELECT miner_id, block_number, sha, nonce, created_at
+        SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
         FROM proof_of_work
+        JOIN miners on miner_id = miners.id
         WHERE miner_id = ?
         "#,
         miner_id
@@ -101,8 +105,9 @@ pub async fn get_oldest(pool: &SqlitePool) -> Result<Option<ProofOfWork>, sqlx::
     sqlx::query_as!(
         ProofOfWork,
         r#"
-        SELECT miner_id, block_number, sha, nonce, created_at
+        SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
         FROM proof_of_work
+        JOIN miners on miner_id = miners.id
         ORDER BY created_at ASC
         LIMIT 1
         "#,

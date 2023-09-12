@@ -5,7 +5,6 @@ use std::{path::Path, fs};
 use actix_web::web::Data;
 use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use service::block::{BlockService, block_updater};
-use service::payment::{payout_updater, payment_verifier};
 use service::submission::submission_updater;
 use sqlx::{SqlitePool};
 
@@ -50,8 +49,6 @@ async fn main() -> std::io::Result<()> {
 
     tokio::spawn(block_updater(block_service.clone()));
     tokio::spawn(submission_updater(pool.clone()));
-    tokio::spawn(payout_updater(pool.clone()));
-    tokio::spawn(payment_verifier(pool.clone()));
     
     HttpServer::new(move || {
         App::new()

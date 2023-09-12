@@ -6,13 +6,10 @@ use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use crate::{
     common::GenericMessageResponse,
-    address::{self, pkh_from_address},
-    model::miner::{self, create_miner, get_miner_by_pkh},
+    address::{self},
+    model::miner::{create_miner, get_miner_by_pkh},
     service::{
-        block::{BlockService, Block, ReadableBlock},
-        proof_of_work::{
-            self, submit_proof_of_work, SubmitProofOfWorkError, SubmitProofOfWorkResponse,
-        },
+        block::{BlockService, ReadableBlock},
     },
 };
 

@@ -1,9 +1,11 @@
+use std::collections::HashMap;
+
 use cardano_multiplatform_lib::{plutus::{PlutusData, PlutusList, ConstrPlutusData, ExUnitPrices, self}, ledger::{common::{value::{Int, BigInt, BigNum, Value}, utxo::TransactionUnspentOutput}, alonzo::{fees::LinearFee, self}}, builders::tx_builder::{TransactionBuilderConfigBuilder, TransactionBuilder}, UnitInterval, chain_crypto::Ed25519, crypto::{PrivateKey, Bip32PrivateKey, TransactionHash}, address::{StakeCredential, Address}, TransactionInput, error::JsError, TransactionOutput, genesis::network_info::plutus_alonzo_cost_models};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::{ service::proof_of_work::get_difficulty, model::datum_submission::{self, accept, reject, get_unconfirmed, DatumSubmission}};
+use crate::{ service::proof_of_work::get_difficulty, model::{datum_submission::{self, accept, reject, get_unconfirmed, DatumSubmission, get_newest_confirmed_datum}, proof_of_work::{self, get_by_time_range}, miner::get_miner_by_pkh, payouts::create_payout}, routes::hashrate::estimate_hashrate, address::pkh_from_address};
 
 use super::block::{Block, KupoUtxo};
 
@@ -44,7 +46,7 @@ const EPOCH_TARGET: u64 = 1_209_600;
 const PADDING: u64 = 16;
 pub const ON_CHAIN_HALF_TIME_RANGE: u64 = 90;
 
-
+const TUNA_PER_DATUM: usize = 5_000_000_000;
 #[derive(Debug, Serialize)]
 pub struct DenoSubmission {
     nonce: String,
@@ -52,8 +54,8 @@ pub struct DenoSubmission {
     current_block: Block,
     new_zeroes: i64,
     new_difficulty: i64,
+    miner_payments: HashMap<String, usize>,  // <Address, Payment>
 }
-
 #[derive(Deserialize)]
 pub struct DenoSubmissionResponse {
     tx_hash: String,
@@ -68,12 +70,53 @@ pub async fn submit(
 ) -> Result<(), SubmissionError> {
     let new_diff_data = get_difficulty(sha);
 
+    let default_fee: i64 = 25000000;
+    let pool_fixed_fee: i64 = std::env::var("POOL_FIXED_FEE")
+        .map(|s| s.parse().unwrap_or(default_fee))
+        .unwrap_or(default_fee);
+
+    let total_payout = TUNA_PER_DATUM - pool_fixed_fee as usize;
+
+    let maybe_last_paid_datum = get_newest_confirmed_datum(pool).await?;
+
+    let start_time = match maybe_last_paid_datum {
+        Some(last_paid_datum) => {
+            last_paid_datum.confirmed_at.unwrap() // guaranteed by the underlying database query
+        },
+        None => {
+            // if no datum has ever been paid before, start from the first proof of work
+            proof_of_work::get_oldest(pool)
+                .await
+                .unwrap().unwrap().created_at  // invariant upheld by the fact that we have a datum
+        }
+    };
+    
+    let end_time = Utc::now().naive_utc();
+    
+    let proofs = get_by_time_range(pool, None, start_time, end_time).await?;
+
+    let estimated_hashrate_total = estimate_hashrate(&proofs, start_time, end_time);
+
+    let mut miner_proofs: std::collections::HashMap<String, Vec<_>> = std::collections::HashMap::new();
+    for proof in &proofs {
+        miner_proofs.entry(proof.miner_address.clone()).or_insert_with(Vec::new).push(proof.clone());
+    }
+
+    let mut miner_payments: HashMap<String, usize> = HashMap::new();
+    for (miner_address, proofs) in &miner_proofs { 
+        let miner_hashrate = estimate_hashrate(proofs.as_ref(), start_time, end_time);
+        let miner_share = miner_hashrate as f64 / estimated_hashrate_total as f64;
+        let miner_payment = (total_payout as f64 * miner_share) as usize;
+        miner_payments.insert(miner_address.clone(), miner_payment);
+    }
+
     let submission = DenoSubmission {
         nonce: hex::encode(nonce),
         sha: hex::encode(sha),
         current_block: current_block.clone(),
         new_difficulty: new_diff_data.difficulty_number as i64,
         new_zeroes: new_diff_data.leading_zeroes as i64,
+        miner_payments: miner_payments.clone(),
     };
 
     let response: DenoSubmissionResponse = reqwest::Client::new()
@@ -87,8 +130,23 @@ pub async fn submit(
     log::info!("Submitted datum on chain in tx_hash {}", &response.tx_hash);
 
     datum_submission::create(
-        pool, response.tx_hash, hex::encode(sha)
+        pool, response.tx_hash.clone(), hex::encode(sha)
     ).await?;
+
+    for (miner_address, payment) in &miner_payments {
+        let Ok(pkh) = pkh_from_address(miner_address) else {
+            continue;
+        };
+        let Some(miner) = get_miner_by_pkh(pool, &pkh).await? else {
+            continue;
+        };
+    
+        let mut tx = pool.begin().await?;
+    
+        create_payout(&mut tx, miner.id, *payment as i64, &response.tx_hash).await?;
+    
+        tx.commit().await?;
+    }
 
     Ok(())
 }
@@ -223,7 +281,7 @@ pub fn build_transaction(
     sha: &[u8; 32],
 ) -> () {
         // TODO: Check this on startup
-        let private_key_ed25519 = std::env::var("POOL_WALLET_PRIVATE_KEY").expect("Must have a POOL_WALLET_PRIVATE_KEY set!");
+        let private_key_ed25519 = std::env::var("MINING_WALLET_PRIVATE_KEY").expect("Must have a MINING_WALLET_PRIVATE_KEY set!");
         let private_key = PrivateKey::from_bech32(&private_key_ed25519).unwrap();
         let cred = StakeCredential::from_keyhash(&private_key.to_public().hash());
         

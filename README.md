@@ -5,7 +5,6 @@ A work in progress mining pool for Fortuna.
 ## How to Run
 - Copy `.env.example` to `.env`
 - Set your environment variables as defined in `.env`.
-	- You will need TWO funded wallets. tunapond-client will generate them in the appropriate way.
 - `cargo install sqlx-cli`
 - `sqlx database setup`
 - `deno run --allow-all submission_server.ts`
