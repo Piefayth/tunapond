@@ -85,7 +85,7 @@ Contains information about the number of accepted hashes and the current chain h
 
 If `num_accepted` is lower than the number of hashes sent, consider reviewing the output locally for duplicate or invalid sha hashes.
 
-If `block_number` has changed since the last time the client has submitted or registered, the client MUST begin mining the new block. Failure to do so will result in rejection of all new submissions.
+Clients are expected to be mining the latest block by any means. While the server pool will provide an up-to-date view of the current block within the response of each submission, this still may lead to the rejection of some hashes due to them being calculated for an "old" block. 
 
 ```json
 {
