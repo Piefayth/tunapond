@@ -3,9 +3,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 
-use crate::{ service::proof_of_work::get_difficulty, model::datum_submission::{self, accept, reject, get_unconfirmed}};
+use crate::{ service::proof_of_work::get_difficulty, model::datum_submission::{self, accept, reject, get_unconfirmed, DatumSubmission}};
 
-use super::block::{Block, KupoTransaction};
+use super::block::{Block, KupoUtxo};
 
 #[derive(Debug)]
 pub enum SubmissionError {
@@ -119,14 +119,19 @@ pub async fn submission_updater(pool: SqlitePool) {
                     continue;
                 };
                 
-                let response_result: Result<Vec<KupoTransaction>, reqwest::Error> = r.json().await;
-                let Ok(kupo_transactions) = response_result else {
+                let response_result: Result<Vec<KupoUtxo>, reqwest::Error> = r.json().await;
+                let Ok(kupo_utxos) = response_result else {
                     log::error!("Failed to parse kupo transaction! Got {:?}", response_result);
                     continue;
                 };
 
                 let tx_hash = datum.transaction_hash.clone();
-                if !kupo_transactions.is_empty() {
+                if !kupo_utxos.is_empty() {
+                    let slot_no = kupo_utxos[0].created_at.slot_no;
+                    let datum = DatumSubmission {
+                        confirmed_in_slot: Some(slot_no),
+                        ..datum
+                    };
                     let result = accept(&pool, vec![datum]).await;
                     log::info!("Permanently accepted datum at transaction {}.", tx_hash);
                     let Ok(_) = result else {

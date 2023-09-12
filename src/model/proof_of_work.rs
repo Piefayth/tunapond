@@ -96,3 +96,17 @@ pub async fn get(
     .fetch_all(pool)
     .await
 }
+
+pub async fn get_oldest(pool: &SqlitePool) -> Result<Option<ProofOfWork>, sqlx::Error> {
+    sqlx::query_as!(
+        ProofOfWork,
+        r#"
+        SELECT miner_id, block_number, sha, nonce, created_at
+        FROM proof_of_work
+        ORDER BY created_at ASC
+        LIMIT 1
+        "#,
+    )
+    .fetch_optional(pool)
+    .await
+}

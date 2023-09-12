@@ -56,11 +56,17 @@ struct KupoDatumResponse {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct KupoTransaction {
+pub struct KupoUtxo {
     pub datum_hash: Option<String>,
     pub value: KupoValue,
     pub output_index: i64,
     pub transaction_id: String,
+    pub created_at: KupoUtxoCreated,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct KupoUtxoCreated {
+    pub slot_no: i64,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -120,14 +126,14 @@ impl BlockService {
             _ => TUNA_CONTRACT_NFT_POLICY_MAINNET
         };
 
-        let all_contract_unspent_tx: Vec<KupoTransaction> = reqwest::get(
+        let all_contract_unspent_tx: Vec<KupoUtxo> = reqwest::get(
                 format!("{}/matches/{}?unspent", self.kupo_url, self.contract_address)
             )
             .await?
             .json()
             .await?;
         
-        let most_recent_datum_tx: KupoTransaction = all_contract_unspent_tx.into_iter()
+        let most_recent_datum_tx: KupoUtxo = all_contract_unspent_tx.into_iter()
             .find(|tx| {
                 let Some(assets) = &tx.value.assets else {
                     return false
@@ -197,7 +203,7 @@ pub async fn block_updater(service: Arc<BlockService>) {
 }
 
 
-fn block_from_datum(datum: String, tx: KupoTransaction) -> Result<Block, BlockServiceError> {
+fn block_from_datum(datum: String, tx: KupoUtxo) -> Result<Block, BlockServiceError> {
     let hex_bytes = hex::decode(datum.as_bytes())
         .map_err(|_| {
             log::warn!("Could not decode hex from datum {}.", datum);

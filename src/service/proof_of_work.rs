@@ -156,6 +156,8 @@ pub async fn submit_proof_of_work(
 
     match maybe_found_block {
         Some(entry) => {
+            // TODO: This is not transactional with submission!
+            // If submit fails here, miners will not be paid for this datum!
             submit(
                 pool,
                 &current_block,
