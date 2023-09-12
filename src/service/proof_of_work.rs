@@ -156,15 +156,13 @@ pub async fn submit_proof_of_work(
 
     match maybe_found_block {
         Some(entry) => {
-            // TODO: This is not transactional with submission!
-            // If submit fails here, miners will not be paid for this datum!
-            submit(
+            let _ = submit(
                 pool,
                 &current_block,
                 hex::decode(&entry.sha).unwrap_or_default().as_slice(),
                 hex::decode(&entry.nonce).unwrap_or_default().as_slice(),
             )
-            .await?;
+            .await;
         }
         None => {}
     }

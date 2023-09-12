@@ -20,6 +20,7 @@ struct WorkRequest {
 
 #[derive(Debug, Serialize)]
 struct WorkResponse {
+    miner_id: i64,
     nonce: String,
     min_zeroes: u8,
     current_block: ReadableBlock,
@@ -73,6 +74,7 @@ async fn work(
 
     HttpResponse::Ok().json(WorkResponse {
         nonce,
+        miner_id,
         min_zeroes: 8,
         current_block: current_block.into()
     })
