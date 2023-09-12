@@ -56,6 +56,7 @@ type Work = {
     nonce: string
 	min_zeroes: number (u8)
     current_block: Block
+	miner_id: number
 }
 ```
 
@@ -110,4 +111,6 @@ If `block_number` has changed since the last time the client has submitted or re
 `GET /hashrate`
 
 #### Request
-`/hashrate?address={}&start_time={}&end_time={}
+`/hashrate?miner_id={}&start_time={}&end_time={}
+
+Returns the estimated hashrate for the specified time period. Times are in UTC seconds.
