@@ -220,13 +220,6 @@ pub struct HashrateResult {
     pub estimated_hashes_per_second: f64,
 }
 
-pub async fn get_proof_of_work(
-    pool: &SqlitePool,
-    miner_id: i64,
-) -> Result<Vec<ProofOfWork>, sqlx::Error> {
-    proof_of_work::get(pool, miner_id).await
-}
-
 // TODO: Why are these u128s?
 #[derive(Default)]
 pub struct Difficulty {

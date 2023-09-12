@@ -83,24 +83,6 @@ pub async fn get_by_time_range(
     }
 }
 
-pub async fn get(
-    pool: &SqlitePool,
-    miner_id: i64,
-) -> Result<Vec<ProofOfWork>, sqlx::Error> {
-    sqlx::query_as!(
-        ProofOfWork,
-        r#"
-        SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
-        FROM proof_of_work
-        JOIN miners on miner_id = miners.id
-        WHERE miner_id = ?
-        "#,
-        miner_id
-    )
-    .fetch_all(pool)
-    .await
-}
-
 pub async fn get_oldest(pool: &SqlitePool) -> Result<Option<ProofOfWork>, sqlx::Error> {
     sqlx::query_as!(
         ProofOfWork,
