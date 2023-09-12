@@ -96,7 +96,7 @@ pub fn generate_nonce(miner_id: i64) -> String {
     }
     
     // 3 byte miner_id
-    nonce[12..15].copy_from_slice(&miner_id.to_be_bytes()[..3]);
+    nonce[12..15].copy_from_slice(&miner_id.to_be_bytes()[5..8]);
     
     // 1 byte pool_id
     nonce[15] = pool_id;

@@ -191,7 +191,9 @@ fn verify_nonce(nonce_bytes: &[u8], miner_id: i64, pool_id: u8) -> bool {
     let last_4_bytes = &nonce_bytes[12..16];
 
     // Compare the first 3 bytes of the last 4 bytes to miner_id
-    if &miner_id.to_be_bytes()[..3] != &last_4_bytes[..3] {
+    if &miner_id.to_be_bytes()[5..8] != &last_4_bytes[..3] {
+        println!("miner id: {}", &miner_id);
+        println!("miner id: {:?}", &miner_id.to_be_bytes()[1..]);
         return false;
     }
 

@@ -7,7 +7,9 @@ pub struct Miner {
 }
 
 // Function to create a new miner.
-pub async fn create_miner(pool: &SqlitePool, pkh: String, address: String) -> Result<u64, sqlx::Error> {
+pub async fn create_miner(pool: &SqlitePool, pkh: String, address: String) -> Result<i64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+
     sqlx::query!(
         r#"
         INSERT INTO miners
@@ -16,11 +18,17 @@ pub async fn create_miner(pool: &SqlitePool, pkh: String, address: String) -> Re
         "#,
         pkh, address
     )
-    .execute(pool)
-    .await
-    .map(|r| r.rows_affected())
-}
+    .execute(tx.as_mut())
+    .await?;
 
+    let id: (i64,) = sqlx::query_as("SELECT last_insert_rowid()")
+        .fetch_one(tx.as_mut())
+        .await?;
+
+    tx.commit().await?;
+
+    Ok(id.0)
+}
 // Optionally: Function to get a miner by its primary key hash (pkh).
 pub async fn get_miner_by_pkh(pool: &SqlitePool, pkh: &str) -> Result<Option<Miner>, sqlx::Error> {
     sqlx::query_as!(

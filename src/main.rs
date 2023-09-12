@@ -28,6 +28,10 @@ async fn main() -> std::io::Result<()> {
     env_logger::init();
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let listen_address = std::env::var("LISTEN_ADDRESS").unwrap_or(String::from("0.0.0.0"));
+    let listen_port_str = std::env::var("LISTEN_PORT").unwrap_or(String::from("7959"));
+    let listen_port: u16 = listen_port_str.parse().expect("Invalid port number");
+
     let sanitized_url = database_url.replace("sqlite://", "");
     let db_path = Path::new(&sanitized_url);
 
@@ -59,7 +63,7 @@ async fn main() -> std::io::Result<()> {
             .service(routes::submit::submit)
             .service(routes::hashrate::hashrate)
     })
-    .bind(("127.0.0.1", 7959))?
+    .bind((listen_address, listen_port))?
     .run()
     .await
 }
