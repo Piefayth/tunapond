@@ -71,10 +71,8 @@ Submit a sample of SHA hashes to the server. Currently the expectation is that a
 {
 	"address": "addr1q9g0grcjlq0jeunpt27gy8w698zukar7wgsy9qp6fjkr23pcsufznxyrxw7j84uaypjvdk7yz3ft007hyx9wm6x7djssrusn86",
 	"entries": [{
-		"sha": "0000000000035fd225f35b60e69db5f3184c88419026b93560d951edb2636a11",
 		"nonce": "6a6fe84d2ffb532fc097e4ad0173ef2e"
 	}, {
-		"sha": "0000000000035fd225f35b60e69db5f3184c88419026b93560d951edbfff6b3",
 		"nonce": "6a6fe84d2ffb532fc097e4ad0173ef2e"
 	}]
 }
