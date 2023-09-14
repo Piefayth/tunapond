@@ -47,19 +47,20 @@ async function handler(request: Request): Promise<Response> {
   
   if (url.pathname === "/submit") {
     console.log("POST /submit")
-    return handleSubmit(request);
+    return handleSubmit(request)
   } else {
-    return new Response("Not Found", { status: 404 });
+    return new Response("Not Found", { status: 404 })
   }
 }
 
 interface DenoSubmission {
-  nonce: string;
-  sha: string;
-  current_block: any;
-  new_zeroes: number; 
-  new_difficulty: number;
-  miner_payments: Record<string, number>;  // <address, amount>
+  nonce: string
+  sha: string
+  current_block: any
+  new_zeroes: number
+  new_difficulty: number
+  miner_payments: Record<string, number>  // <address, amount>
+  hash_rate: number
 }
 
 
@@ -80,6 +81,8 @@ const OwnerDataSchema = Data.Object({
 type OwnerData = Data.Static<typeof OwnerDataSchema>
 const OwnerData = OwnerDataSchema as unknown as OwnerData
 
+// it is expensive to look up every datum on every contract utxo every time someone gets paid
+// so we cache them and hydrate it periodically 
 class OwnerDatumCache {
   storeByUtxo: Record<string, OwnerData> = {} // <utxoRef, datum>
   
@@ -218,7 +221,7 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
       Object.keys(utxo.assets).length == 1 && utxo.assets["lovelace"]
     ) || utxo.assets[poolMasterToken]
   })
-
+  
   try {
     const temp_tx = lucid.newTx()
       .collectFrom(
@@ -245,6 +248,9 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
       .attachSpendingValidator({  // TODO: Read from chain instead of having in here, we can publish to preview ourself
         type: "PlutusV2",
         script: tunaValidatorCode
+      })
+      .attachMetadata(674, {
+        hash_rate: BigInt(Math.floor(answer.hash_rate)),
       })
       .readFrom(poolScriptRef)
       .validTo(realTimeNow + 180000)

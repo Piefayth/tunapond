@@ -43,6 +43,7 @@ pub struct DenoSubmission {
     new_zeroes: i64,
     new_difficulty: i64,
     miner_payments: HashMap<String, usize>,  // <Address, Payment>
+    hash_rate: f64,
 }
 #[derive(Deserialize)]
 pub struct DenoSubmissionResponse {
@@ -112,6 +113,7 @@ pub async fn submit(
         new_difficulty: new_diff_data.difficulty_number as i64,
         new_zeroes: new_diff_data.leading_zeroes as i64,
         miner_payments: miner_payments.clone(),
+        hash_rate: estimated_hashrate_total
     };
 
     let response: DenoSubmissionResponse = reqwest::Client::new()
