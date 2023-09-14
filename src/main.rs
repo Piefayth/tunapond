@@ -26,6 +26,7 @@ async fn main() -> std::io::Result<()> {
     }
 
     env_logger::init();
+    pool_is_configured();
 
     let database_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let listen_address = std::env::var("LISTEN_ADDRESS").unwrap_or(String::from("0.0.0.0"));
@@ -66,4 +67,13 @@ async fn main() -> std::io::Result<()> {
     .bind((listen_address, listen_port))?
     .run()
     .await
+}
+
+fn pool_is_configured() {
+    std::env::var("POOL_CONTRACT_ADDRESS").expect("POOL_CONTRACT_ADDRESS must be set");
+    std::env::var("POOL_SCRIPT_HASH").expect("POOL_CONTRACT_ADDRESS must be set");
+    std::env::var("POOL_OUTPUT_REFERENCE").expect("POOL_CONTRACT_ADDRESS must be set");
+    std::env::var("POOL_FIXED_FEE").expect("POOL_FIXED_FEE must be set");
+    std::env::var("KUPO_URL").expect("KUPO_URL must be set");
+    std::env::var("OGMIOS_URL").expect("OGMIOS_URL must be set");
 }

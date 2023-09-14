@@ -16,9 +16,10 @@ A work in progress mining pool for Fortuna.
 ```
 25637629.87f143f0565015a923da8f49d9c504835528c68d9a476dd0200696271e8713ac
 
-502fbfbdafc7ddada9c335bd1440781e5445d08bada77dc2032866a6.54554e41	# Policy
-addr_test1wpgzl0aa4lramtdfcv6m69zq0q09g3ws3wk6wlwzqv5xdfsdcf2qa	# Contract address
-addr_testxxxxxxxx  # YOUR MINING WALLET
+502fbfbdafc7ddada9c335bd1440781e5445d08bada77dc2032866a6.54554e41	# Tuna Policy
+addr_test1wpgzl0aa4lramtdfcv6m69zq0q09g3ws3wk6wlwzqv5xdfsdcf2qa	# Tuna Contract address
+addr_testxxxxxxxx  # POOL MINING WALLET
+addr_testxxxxxxxx  # THE POOL CONTRACT ADDRESS
 ```
 
 ## How generate a pool wallet

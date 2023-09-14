@@ -99,13 +99,13 @@ impl BlockService {
     pub fn new() -> Self {
         let history = Arc::new(RwLock::new(VecDeque::with_capacity(MAX_ITEMS)));
         let kupo_url = env::var("KUPO_URL").expect("Cannot instantiate BlockService because KUPO_URL is not set.");
-        let contract_address = env::var("CONTRACT_ADDRESS")
+        let tuna_contract_address = env::var("TUNA_CONTRACT_ADDRESS")
             .unwrap_or(String::from("addr1wynelppvx0hdjp2tnc78pnt28veznqjecf9h3wy4edqajxsg7hwsc"));
 
         BlockService { 
             history,
             kupo_url,
-            contract_address
+            contract_address: tuna_contract_address
         }
     }
 
