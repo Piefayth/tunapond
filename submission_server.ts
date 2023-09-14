@@ -81,7 +81,6 @@ type OwnerData = Data.Static<typeof OwnerDataSchema>
 const OwnerData = OwnerDataSchema as unknown as OwnerData
 
 class OwnerDatumCache {
-  // Note: If we ever start keeping dynamic state on the datums, they cannot be cached this way!
   storeByUtxo: Record<string, OwnerData> = {} // <utxoRef, datum>
   
   async getOwnerDatumByUtxo(utxo: UTxO): Promise<OwnerData | null> {
@@ -102,9 +101,33 @@ class OwnerDatumCache {
     }
   }
 
+  async hydrateCache(): Promise<void> {
+    const poolContractUtxos = await lucid.utxosAt(POOL_CONTRACT_ADDRESS);
+    
+    const ownerDataForUtxos = await Promise.all(poolContractUtxos.map(async (utxo) => {
+      const ref = `${utxo.txHash}#${utxo.outputIndex}`
+      const ownerDataForUtxo = await ownerDatumCache.getOwnerDatumByUtxo(utxo);
+      return { ref, ownerData: ownerDataForUtxo }
+    }))
+
+    for (const { ref, ownerData } of ownerDataForUtxos) {
+      if (ownerData) {
+        this.storeByUtxo[ref] = ownerData;
+      }
+    }
+  }
+
 }
 
 const ownerDatumCache = new OwnerDatumCache()
+const CACHE_HYDRATION_INTERVAL = 5000
+await ownerDatumCache.hydrateCache()
+console.log("Owner Datum cache was hydrated.")
+
+setInterval(() => {
+  // this costs nothing if there aren't new utxos at the pool contract, so it can be relatively frequent
+  ownerDatumCache.hydrateCache()
+}, CACHE_HYDRATION_INTERVAL)
 
 async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promise<Response> {
   const validatorHash = network === "Mainnet" ? TUNA_VALIDATOR_HASH_MAINNET : TUNA_VALIDATOR_HASH_PREVIEW
@@ -219,7 +242,7 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
         { [poolMasterToken]: 1n }
       )
       .mintAssets(mintTuna, Data.to(new Constr(0, [])))
-      .attachSpendingValidator({
+      .attachSpendingValidator({  // TODO: Read from chain instead of having in here, we can publish to preview ourself
         type: "PlutusV2",
         script: tunaValidatorCode
       })

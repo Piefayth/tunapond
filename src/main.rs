@@ -50,6 +50,13 @@ async fn main() -> std::io::Result<()> {
 
     sqlx::migrate!().run(&pool).await.unwrap();
 
+    sqlx::query("PRAGMA journal_mode=WAL")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    log::info!("WAL is enabled.");
+
     let block_service = Arc::new(BlockService::new());
 
     tokio::spawn(block_updater(block_service.clone()));

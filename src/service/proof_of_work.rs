@@ -143,8 +143,6 @@ pub async fn submit_proof_of_work(
     )
     .await?;
 
-    println!("Num accepted: {}", num_accepted);
-
     let maybe_found_block = valid_samples.iter().find(|sample| {
         let entry_difficulty = get_difficulty(&sample.sha);
 
@@ -154,11 +152,12 @@ pub async fn submit_proof_of_work(
             entry_difficulty.leading_zeroes == current_block.leading_zeroes as u128;
         let enough_difficulty =
             entry_difficulty.difficulty_number < current_block.difficulty_number as u128;
-        if too_many_zeroes || (just_enough_zeroes && enough_difficulty) {
-            true
-        } else {
-            false
-        }
+
+        // to keep the submission server from exploding due to request volume in preview, submission are minimum 10
+        let enough_preview_zeroes = entry_difficulty.leading_zeroes > 9; 
+        let is_true_new_block = too_many_zeroes || (just_enough_zeroes && enough_difficulty);
+
+        enough_preview_zeroes && is_true_new_block
     });
 
     match maybe_found_block {
