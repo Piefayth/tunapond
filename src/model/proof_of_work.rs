@@ -1,7 +1,7 @@
 use sqlx::sqlite::SqlitePool;
 use chrono::NaiveDateTime;
 
-use crate::routes::submit::SubmissionEntry;
+use crate::{service::proof_of_work::ProcessedSubmissionEntry};
 
 #[derive(Clone)]
 pub struct ProofOfWork {
@@ -17,19 +17,22 @@ pub async fn create(
     pool: &SqlitePool,
     miner_id: i64,
     block_number: i64,
-    new_pows: &Vec<&SubmissionEntry>,
+    new_pows: &Vec<ProcessedSubmissionEntry>,
 ) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await?;
     let mut success_count = 0;
 
     for new_pow in new_pows.iter() {
+        let hex_sha = hex::encode(new_pow.sha);
+        let hex_nonce = hex::encode(new_pow.nonce);
+
         match sqlx::query!(
             r#"
             INSERT INTO proof_of_work
             (miner_id, block_number, sha, nonce, created_at)
             VALUES (?, ?, ?, ?, datetime('now'))
             "#,
-            miner_id, block_number, new_pow.sha, new_pow.nonce
+            miner_id, block_number, hex_sha, hex_nonce
         )
         .execute(tx.as_mut())
         .await {

@@ -6,15 +6,14 @@ use sqlx::SqlitePool;
 use crate::common::GenericMessageResponse;
 use crate::{address, service::{proof_of_work::{submit_proof_of_work, SubmitProofOfWorkError, SubmitProofOfWorkResponse}, block::BlockService}, model::miner::get_miner_by_pkh};
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Submission {
     pub address: String,
     pub entries: Vec<SubmissionEntry>
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SubmissionEntry {
-    pub sha: String,
     pub nonce: String
 }
 

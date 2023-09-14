@@ -265,7 +265,7 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
         tx_hash
       }), { status: 200 })
     } else {
-      if (retries < 2) {
+      if (retries < 1) {
         console.log(`Submission timed out. Retry ${retries}.`)
         return handleSubmitRetrying(answer, retries + 1)
       } else {

@@ -1,6 +1,6 @@
 use crate::model::proof_of_work::ProofOfWork;
 use crate::model::proof_of_work::{self};
-use crate::routes::submit::Submission;
+use crate::routes::submit::{Submission};
 use crate::routes::work::generate_nonce;
 use cardano_multiplatform_lib::error::JsError;
 use cardano_multiplatform_lib::ledger::common::value::BigInt;
@@ -60,6 +60,11 @@ pub struct SubmitProofOfWorkResponse {
 
 const SAMPLING_DIFFICULTY: u8 = 8;
 
+pub struct ProcessedSubmissionEntry {
+    pub nonce: [u8; 16],
+    pub sha: [u8; 32]
+}
+
 pub async fn submit_proof_of_work(
     pool: &SqlitePool,
     block_service: &Arc<BlockService>,
@@ -100,30 +105,32 @@ pub async fn submit_proof_of_work(
     ));
 
     let mut target_state_bytes = target_state.to_bytes();
-
-    let valid_samples: Vec<_> = submission
+    
+    let valid_samples: Vec<ProcessedSubmissionEntry> = submission
         .entries
         .iter()
-        .filter(|&entry| {
-            let sha_binding = hex::decode(&entry.sha).unwrap_or_default();
-            let sha_bytes = sha_binding.as_slice();
+        .filter_map(|entry| {
             let nonce_binding = hex::decode(&entry.nonce).unwrap_or_default();
-            let nonce_bytes = nonce_binding.as_slice();
-            let entry_difficulty = get_difficulty(sha_bytes);
 
-            if entry_difficulty.leading_zeroes < SAMPLING_DIFFICULTY as u128 {
-                return false;
+            if nonce_binding.len() != 16 {
+                return None
             }
+            let nonce_bytes: [u8; 16] = nonce_binding.try_into().unwrap();
 
-            target_state_bytes[4..20].copy_from_slice(nonce_bytes);
+            target_state_bytes[4..20].copy_from_slice(&nonce_bytes);
             let hashed_data = sha256_digest_as_bytes(&target_state_bytes);
             let hashed_hash = sha256_digest_as_bytes(&hashed_data);
 
-            if !hashed_hash.eq(sha_bytes) {
-                return false;
+            let entry_difficulty = get_difficulty(&hashed_hash);
+            if entry_difficulty.leading_zeroes < SAMPLING_DIFFICULTY as u128 {
+                return None
             }
 
-            return verify_nonce(nonce_bytes, miner_id, pool_id)
+            if !verify_nonce(&nonce_bytes, miner_id, pool_id) {
+                return None
+            }
+
+            return Some(ProcessedSubmissionEntry { nonce: nonce_bytes, sha: hashed_hash })
         })
         .collect();
 
@@ -136,10 +143,10 @@ pub async fn submit_proof_of_work(
     )
     .await?;
 
+    println!("Num accepted: {}", num_accepted);
+
     let maybe_found_block = valid_samples.iter().find(|sample| {
-        let sha_binding = hex::decode(&sample.sha).unwrap_or_default();
-        let sha_bytes = sha_binding.as_slice();
-        let entry_difficulty = get_difficulty(sha_bytes);
+        let entry_difficulty = get_difficulty(&sample.sha);
 
         let too_many_zeroes =
             entry_difficulty.leading_zeroes > current_block.leading_zeroes as u128;
@@ -159,8 +166,8 @@ pub async fn submit_proof_of_work(
             let _ = submit(
                 pool,
                 &current_block,
-                hex::decode(&entry.sha).unwrap_or_default().as_slice(),
-                hex::decode(&entry.nonce).unwrap_or_default().as_slice(),
+                &entry.sha,
+                &entry.nonce
             )
             .await;
         }
