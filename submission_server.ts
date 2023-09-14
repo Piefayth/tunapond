@@ -221,12 +221,9 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
       Object.keys(utxo.assets).length == 1 && utxo.assets["lovelace"]
     ) || utxo.assets[poolMasterToken]
   })
-  
+
   try {
     const temp_tx = lucid.newTx()
-      .collectFrom(
-        poolfundingUtxos  // spend the pool's ada and the master token as needed, but never the tuna
-      )
       .collectFrom(
         [validatorOutRef],
         Data.to(new Constr(1, [answer.nonce])),
@@ -279,7 +276,7 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
       
     }
 
-    const tx = await temp_tx.complete({ coinSelection: false })
+    const tx = await temp_tx.complete()
     const signed = await tx.sign().complete()
 
     const tx_hash = await Promise.race([
