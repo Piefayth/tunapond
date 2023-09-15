@@ -14,7 +14,7 @@ use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
-use super::block::{BlockService, BlockServiceError, ReadableBlock};
+use super::block::{BlockService, BlockServiceError, ReadableBlock, Block};
 use super::submission::submit;
 use super::submission::SubmissionError;
 
@@ -53,9 +53,15 @@ impl From<BlockServiceError> for SubmitProofOfWorkError {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SubmitProofOfWorkResponse {
-    num_accepted: u64,
-    nonce: String,
-    working_block: ReadableBlock,
+    pub num_accepted: u64,
+    pub nonce: String,
+    pub working_block: ReadableBlock,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RawSubmitProofOfWorkResponse {
+    pub num_accepted: u64,
+    pub raw_target_state: String,
 }
 
 const SAMPLING_DIFFICULTY: u8 = 8;
@@ -63,6 +69,34 @@ const SAMPLING_DIFFICULTY: u8 = 8;
 pub struct ProcessedSubmissionEntry {
     pub nonce: [u8; 16],
     pub sha: [u8; 32]
+}
+
+const default_nonce: [u8; 16] = [0; 16];
+
+pub fn block_to_target_state(block: &Block, nonce: &[u8; 16]) -> PlutusData {
+    let mut target_state_fields = PlutusList::new();
+
+    let nonce_field = PlutusData::new_bytes(nonce.to_vec());
+    let block_number_field = PlutusData::new_integer(&BigInt::from(block.block_number));
+    let current_hash_field = PlutusData::new_bytes(block.current_hash.clone());
+    let leading_zeroes_field = PlutusData::new_integer(&BigInt::from(block.leading_zeroes));
+    let difficulty_number_field =
+        PlutusData::new_integer(&BigInt::from(block.difficulty_number));
+    let epoch_time_field = PlutusData::new_integer(&BigInt::from(block.epoch_time));
+
+    target_state_fields.add(&nonce_field);
+    target_state_fields.add(&block_number_field);
+    target_state_fields.add(&current_hash_field);
+    target_state_fields.add(&leading_zeroes_field);
+    target_state_fields.add(&difficulty_number_field);
+    target_state_fields.add(&epoch_time_field);
+
+    let target_state = PlutusData::new_constr_plutus_data(&ConstrPlutusData::new(
+        &BigNum::from_str("0").unwrap(),
+        &target_state_fields,
+    ));
+
+    return target_state
 }
 
 pub async fn submit_proof_of_work(
@@ -80,32 +114,9 @@ pub async fn submit_proof_of_work(
     // behavior. Depending on the error, miners may need removed from the pool...
 
     let current_block = block_service.get_latest()?;
-    let default_nonce: [u8; 16] = [0; 16];
+    let nonce = generate_nonce(miner_id);
+    let mut target_state_bytes = block_to_target_state(&current_block, &nonce).to_bytes();
 
-    let mut target_state_fields = PlutusList::new();
-
-    let nonce_field = PlutusData::new_bytes(default_nonce.to_vec());
-    let block_number_field = PlutusData::new_integer(&BigInt::from(current_block.block_number));
-    let current_hash_field = PlutusData::new_bytes(current_block.current_hash.clone());
-    let leading_zeroes_field = PlutusData::new_integer(&BigInt::from(current_block.leading_zeroes));
-    let difficulty_number_field =
-        PlutusData::new_integer(&BigInt::from(current_block.difficulty_number));
-    let epoch_time_field = PlutusData::new_integer(&BigInt::from(current_block.epoch_time));
-
-    target_state_fields.add(&nonce_field);
-    target_state_fields.add(&block_number_field);
-    target_state_fields.add(&current_hash_field);
-    target_state_fields.add(&leading_zeroes_field);
-    target_state_fields.add(&difficulty_number_field);
-    target_state_fields.add(&epoch_time_field);
-
-    let target_state = PlutusData::new_constr_plutus_data(&ConstrPlutusData::new(
-        &BigNum::from_str("0").unwrap(),
-        &target_state_fields,
-    ));
-
-    let mut target_state_bytes = target_state.to_bytes();
-    
     let valid_samples: Vec<ProcessedSubmissionEntry> = submission
         .entries
         .iter()
@@ -176,7 +187,7 @@ pub async fn submit_proof_of_work(
     Ok(SubmitProofOfWorkResponse {
         num_accepted: num_accepted,
         working_block: current_block.into(),
-        nonce: generate_nonce(miner_id)
+        nonce: hex::encode(&nonce)
     })
 }
 

@@ -9,13 +9,14 @@ use crate::{
     address::{self},
     model::miner::{create_miner, get_miner_by_pkh},
     service::{
-        block::{BlockService, ReadableBlock},
+        block::{BlockService, ReadableBlock}, proof_of_work::block_to_target_state,
     },
 };
 
 #[derive(Debug, Deserialize)]
 struct WorkRequest {
     address: String,
+    raw: Option<bool>
 }
 
 #[derive(Debug, Serialize)]
@@ -24,6 +25,13 @@ struct WorkResponse {
     nonce: String,
     min_zeroes: u8,
     current_block: ReadableBlock,
+}
+
+#[derive(Debug, Serialize)]
+struct RawWorkResponse {
+    miner_id: i64,
+    min_zeroes: u8,
+    raw_target_state: String,
 }
 
 #[get("/work")]
@@ -72,15 +80,24 @@ async fn work(
         });
     };
 
-    HttpResponse::Ok().json(WorkResponse {
-        nonce,
-        miner_id,
-        min_zeroes: 8,
-        current_block: current_block.into()
-    })
+    if query.raw.is_some() && query.raw.unwrap() {
+        HttpResponse::Ok().json(RawWorkResponse {
+            miner_id,
+            min_zeroes: 8,
+            raw_target_state: hex::encode(block_to_target_state(&current_block, &nonce).to_bytes())
+        })
+    } else {
+        HttpResponse::Ok().json(WorkResponse {
+            nonce: hex::encode(nonce),
+            miner_id,
+            min_zeroes: 8,
+            current_block: current_block.into()
+        })
+    }
+
 }
 
-pub fn generate_nonce(miner_id: i64) -> String {
+pub fn generate_nonce(miner_id: i64) -> [u8; 16] {
     let pool_id: u8 = std::env::var("POOL_ID")
         .expect("POOL_ID must be set")
         .parse()
@@ -88,18 +105,16 @@ pub fn generate_nonce(miner_id: i64) -> String {
 
     let mut rng = rand::thread_rng();
 
-    let mut nonce = vec![0u8; 16]; // 16 bytes in total
-    
+    let mut nonce = [0u8; 16]; // 16 bytes in total
+
     // Generate 12 random bytes
-    for i in 0..12 {
-        nonce[i] = rng.gen::<u8>();
-    }
-    
+    nonce[0..12].copy_from_slice(&rng.gen::<[u8; 12]>());
+
     // 3 byte miner_id
     nonce[12..15].copy_from_slice(&miner_id.to_be_bytes()[5..8]);
-    
+
     // 1 byte pool_id
     nonce[15] = pool_id;
 
-    hex::encode(nonce)
+    nonce
 }

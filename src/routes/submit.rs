@@ -4,7 +4,14 @@ use actix_web::{ post, web, HttpResponse, Responder};
 use serde::{Serialize, Deserialize};
 use sqlx::SqlitePool;
 use crate::common::GenericMessageResponse;
+use crate::routes::work::generate_nonce;
+use crate::service::proof_of_work::{block_to_target_state, RawSubmitProofOfWorkResponse};
 use crate::{address, service::{proof_of_work::{submit_proof_of_work, SubmitProofOfWorkError, SubmitProofOfWorkResponse}, block::BlockService}, model::miner::get_miner_by_pkh};
+
+#[derive(Debug, Deserialize)]
+struct SubmissionQuery {
+    raw: Option<bool>
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Submission {
@@ -22,6 +29,7 @@ async fn submit(
     pool: web::Data<SqlitePool>,
     block_service: web::Data<Arc<BlockService>>,
     submission: web::Json<Submission>,
+    query: web::Query<SubmissionQuery>,
 ) -> impl Responder {
     let maybe_pkh = address::pkh_from_address(&submission.address);
 
@@ -54,7 +62,18 @@ async fn submit(
 
     match result {
         Ok(submission_response) => {
-            HttpResponse::Ok().json(submission_response)
+            if query.raw.is_some() && query.raw.unwrap() {
+                let current_block = block_service.get_latest().unwrap_or_default();
+                let nonce = generate_nonce(miner.id);
+
+
+                HttpResponse::Ok().json(RawSubmitProofOfWorkResponse {
+                    num_accepted: submission_response.num_accepted,
+                    raw_target_state: hex::encode(block_to_target_state(&current_block, &nonce).to_bytes())
+                })
+            } else {
+                HttpResponse::Ok().json(submission_response)
+            }
         },
         Err(e) => {
             match e {
