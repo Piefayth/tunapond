@@ -103,7 +103,7 @@ pub async fn get_oldest(pool: &SqlitePool) -> Result<Option<ProofOfWork>, sqlx::
 
 pub async fn cleanup_old_proofs(pool: &SqlitePool, num_to_retain: i64) -> Result<(), sqlx::Error> {
     let offset = num_to_retain - 1;
-    let date_of_nth_oldest_confirmed_datum = sqlx::query!(
+    let date_of_nth_oldest_confirmed_datum_result = sqlx::query!(
         r#"
         SELECT confirmed_at
         FROM datum_submissions
@@ -111,13 +111,14 @@ pub async fn cleanup_old_proofs(pool: &SqlitePool, num_to_retain: i64) -> Result
         ORDER BY confirmed_at DESC
         LIMIT 1 OFFSET ?
         "#,
-        offset // Subtract 1 since OFFSET starts at 0
+        offset
     )
-    .fetch_one(pool)
-    .await?
-    .confirmed_at;
+    .fetch_optional(pool)
+    .await?;
 
-    if let Some(oldest_datum_date) = date_of_nth_oldest_confirmed_datum {
+    if let Some(row) = date_of_nth_oldest_confirmed_datum_result {
+        let oldest_datum_date = row.confirmed_at;
+        
         sqlx::query!(
             r#"
             DELETE FROM proof_of_work
