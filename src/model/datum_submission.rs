@@ -15,14 +15,15 @@ pub async fn create(
     pool: &SqlitePool,
     transaction_hash: String,
     sha: String,
+    block_number: i64,
 ) -> Result<u64, sqlx::Error> {
     sqlx::query!(
         r#"
         INSERT INTO datum_submissions
-        (transaction_hash, sha, created_at, rejected)
-        VALUES (?, ?, datetime('now'), FALSE)
+        (transaction_hash, sha, block_number, created_at, rejected)
+        VALUES (?, ?, ?, datetime('now'), FALSE)
         "#,
-        transaction_hash, sha
+        transaction_hash, sha, block_number
     )
     .execute(pool)
     .await
