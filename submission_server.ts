@@ -10,12 +10,14 @@ loadSync({ export: true })
 const delay = (ms: number | undefined) =>
   new Promise((res) => setTimeout(res, ms));
 
+const TUNA_REWARD_AMOUNT = 5_000_000_000n;
 const miningWalletPrivateKey = Deno.env.get("MINING_WALLET_PRIVATE_KEY")
 const network = Deno.env.get("NETWORK") as Network
 const KUPO_URL = Deno.env.get("KUPO_URL")!
 const OGMIOS_URL = Deno.env.get("OGMIOS_URL")!
 const POOL_CONTRACT_ADDRESS = Deno.env.get("POOL_CONTRACT_ADDRESS")!
 const POOL_SCRIPT_HASH = Deno.env.get("POOL_SCRIPT_HASH")!
+const POOL_FIXED_FEE = BigInt(Deno.env.get("POOL_FIXED_FEE")!)
 const [POOL_OUTPUT_REF_TX, POOL_OUTPUT_REF_INDEX] = Deno.env.get("POOL_OUTPUT_REFERENCE")!.split("#")
 
 if (!POOL_OUTPUT_REF_TX || !POOL_OUTPUT_REF_INDEX) {
@@ -75,62 +77,11 @@ async function handleSubmit(request: Request): Promise<Response> {
   return handleSubmitRetrying(answer)
 }
 
-const OwnerDataSchema = Data.Object({
-  owner_vkh: Data.Bytes()
+const BankSchema = Data.Object({
+  owners: Data.Map(Data.Bytes(), Data.Integer())
 })
-type OwnerData = Data.Static<typeof OwnerDataSchema>
-const OwnerData = OwnerDataSchema as unknown as OwnerData
-
-// it is expensive to look up every datum on every contract utxo every time someone gets paid
-// so we cache them and hydrate it periodically 
-class OwnerDatumCache {
-  storeByUtxo: Record<string, OwnerData> = {} // <utxoRef, datum>
-  
-  async getOwnerDatumByUtxo(utxo: UTxO): Promise<OwnerData | null> {
-    const ref = `${utxo.txHash}#${utxo.outputIndex}`
-    if (this.storeByUtxo[ref]) {
-      return this.storeByUtxo[ref]
-    }
-
-    try {
-      const datum = await lucid.datumOf<OwnerData>(utxo, OwnerDataSchema)
-      if (!datum) {
-        return null
-      }
-      this.storeByUtxo[ref] = datum
-      return datum
-    } catch (_) {
-      return null
-    }
-  }
-
-  async hydrateCache(): Promise<void> {
-    const poolContractUtxos = await lucid.utxosAt(POOL_CONTRACT_ADDRESS);
-    
-    const ownerDataForUtxos = await Promise.all(poolContractUtxos.map(async (utxo) => {
-      const ref = `${utxo.txHash}#${utxo.outputIndex}`
-      const ownerDataForUtxo = await ownerDatumCache.getOwnerDatumByUtxo(utxo);
-      return { ref, ownerData: ownerDataForUtxo }
-    }))
-
-    for (const { ref, ownerData } of ownerDataForUtxos) {
-      if (ownerData) {
-        this.storeByUtxo[ref] = ownerData;
-      }
-    }
-  }
-
-}
-
-const ownerDatumCache = new OwnerDatumCache()
-const CACHE_HYDRATION_INTERVAL = 5000
-await ownerDatumCache.hydrateCache()
-console.log("Owner Datum cache was hydrated.")
-
-setInterval(() => {
-  // this costs nothing if there aren't new utxos at the pool contract, so it can be relatively frequent
-  ownerDatumCache.hydrateCache()
-}, CACHE_HYDRATION_INTERVAL)
+type BankData = Data.Static<typeof BankSchema>
+const BankData = BankSchema as unknown as BankData
 
 async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promise<Response> {
   const validatorHash = network === "Mainnet" ? TUNA_VALIDATOR_HASH_MAINNET : TUNA_VALIDATOR_HASH_PREVIEW
@@ -188,61 +139,78 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
   ]);
   const outDat = Data.to(postDatum);
   const tunaAssetName = validatorHash + fromText("TUNA")
-  const mintTuna = { [tunaAssetName]: 5000000000n }
+  const mintTuna = { [tunaAssetName]: TUNA_REWARD_AMOUNT }
   const tunaMasterToken = { [validatorHash + fromText("lord tuna")]: 1n }
   const poolMasterToken = `${POOL_SCRIPT_HASH}${fromText("POOL")}`
-
+  const poolBankToken = `${POOL_SCRIPT_HASH}${fromText("BANK")}`
   const poolContractUtxos = await lucid.utxosAt(POOL_CONTRACT_ADDRESS)
-  // now we need to filter the pool contract utxos by the users who actually need to get paid
-  // i.e. do not spend someone else's account 
 
-  const paidAddressToUtxoMap: Record<string, UTxO> = {} // these utxos are "miner accounts" on the contract address
-  const utxoRefToPaidAddressMap: Record<string, string> = {}
-  for (const [address, _] of Object.entries(answer.miner_payments)) {
+  const bankUtxo = poolContractUtxos.find(utxo => {
+    return utxo.assets[poolBankToken]
+  })
+
+  if (!bankUtxo) {
+    console.log("There is no BANK token at the POOL_CONTRACT_ADDRESS")
+    return new Response(JSON.stringify({
+      message: "There is no BANK token at the POOL_CONTRACT_ADDRESS"
+    }), { status: 500 })
+  }
+
+  const bankData = await lucid.datumOf<BankData>(bankUtxo, BankSchema)
+  const newBankData: BankData = {
+    owners: new Map<string, bigint>()
+  }
+
+  for (const address in answer.miner_payments) {
     const vkh = lucid.utils.paymentCredentialOf(address)!.hash
-    for (const utxo of poolContractUtxos) {
-      const ownerDataForUtxo = await ownerDatumCache.getOwnerDatumByUtxo(utxo)
-      if (ownerDataForUtxo && ownerDataForUtxo.owner_vkh == vkh) {
-        paidAddressToUtxoMap[address] = utxo
-        utxoRefToPaidAddressMap[`${utxo.txHash}#${utxo.outputIndex}`] = address
-      }
+    const rewardAmount = answer.miner_payments[address]
+    
+    if (bankData.owners.has(vkh)) {
+      const existingAmount = bankData.owners.get(vkh)
+      newBankData.owners.set(vkh, existingAmount! + BigInt(rewardAmount))
+    } else {
+      newBankData.owners.set(vkh, BigInt(rewardAmount))
     }
   }
 
+  newBankData.owners = new Map([...bankData.owners, ...newBankData.owners].sort((a, b) =>  a[0].localeCompare(b[0]) ));
 
-  // only spend utxos representing the accounts getting paid
-  const filteredPoolContractUtxos = poolContractUtxos
-    .filter(potentialInput => {
-      return utxoRefToPaidAddressMap[`${potentialInput.txHash}#${potentialInput.outputIndex}`]
-    })
-
-  const poolfundingUtxos = (await lucid.wallet.getUtxos()).filter(utxo => {
-    return (
-      Object.keys(utxo.assets).length == 1 && utxo.assets["lovelace"]
-    ) || utxo.assets[poolMasterToken]
-  })
+  const newBankedAmount = [...newBankData.owners.values()].reduce((acc, cur) => {
+    return acc + cur
+  }, 0n)
 
   try {
     const temp_tx = lucid.newTx()
-      .collectFrom(
+      .collectFrom( // part of normal mining tx
         [validatorOutRef],
         Data.to(new Constr(1, [answer.nonce])),
       )
-      .collectFrom(
-        filteredPoolContractUtxos,
+      .collectFrom( // spend the bank utxo
+        [bankUtxo],
         Data.to(new Constr(1, [new Constr(0, [])]))
       )
-      .payToAddressWithData(
+      .payToAddressWithData(  // part of normal mining tx
         tunaValidatorAddress,
         { inline: outDat },
         tunaMasterToken
       )
-      .payToAddress(
+      .payToAddress(  // pay the pool master token back to the pool's account
         poolRewardAddress,
-        { [poolMasterToken]: 1n }
+        { 
+          [poolMasterToken]: 1n,
+          [tunaAssetName]: POOL_FIXED_FEE // and give them their cut
+        }
+      )
+      .payToAddressWithData(
+        POOL_CONTRACT_ADDRESS,
+        { inline: Data.to(newBankData, BankData) },
+        { 
+          [poolBankToken]: 1n,  // pay the bank the identifying NFT and the aggregate proper total of tuna
+          [tunaAssetName]: newBankedAmount
+        },
       )
       .mintAssets(mintTuna, Data.to(new Constr(0, [])))
-      .attachSpendingValidator({  // TODO: Read from chain instead of having in here, we can publish to preview ourself
+      .attachSpendingValidator({  // TODO: Read from chain instead of having in here
         type: "PlutusV2",
         script: tunaValidatorCode
       })
@@ -252,29 +220,6 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
       .readFrom(poolScriptRef)
       .validTo(realTimeNow + 180000)
       .validFrom(realTimeNow)
-    
-    for (const [address, amount] of Object.entries(answer.miner_payments)) {
-      const existingUtxo = paidAddressToUtxoMap[address]
-      if (existingUtxo) {
-        // this miner has been paid before
-        const existingDatum = (await ownerDatumCache.getOwnerDatumByUtxo(existingUtxo))! // contract address is (hopefully) guaranteed to always have valid datums
-        const oldTuna = existingUtxo.assets[tunaAssetName]
-
-        // reuse the existing owner datum, and pay them their account balance PLUS what they earned this block
-        temp_tx.payToAddressWithData(POOL_CONTRACT_ADDRESS, { inline: Data.to(existingDatum, OwnerData) }, {
-          ...existingUtxo.assets,
-          [tunaAssetName]: oldTuna + BigInt(amount)
-        })
-      } else {
-        // this miner has never been paid
-        // create a new owner datum, and pay them exactly what they earned in this block
-        const owner_vkh = lucid.utils.paymentCredentialOf(address)!.hash
-        temp_tx.payToAddressWithData(POOL_CONTRACT_ADDRESS, { inline: Data.to({ owner_vkh }, OwnerData) }, {
-          [tunaAssetName]: BigInt(amount)
-        })
-      }
-      
-    }
 
     const tx = await temp_tx.complete()
     const signed = await tx.sign().complete()
