@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashSet};
 
 use actix_web::{get, web, HttpResponse, Responder};
 use rand::Rng;
@@ -39,6 +39,7 @@ async fn work(
     pool: web::Data<Pool<Postgres>>, 
     query: web::Query<WorkRequest>,
     block_service: web::Data<Arc<BlockService>>,
+    whitelist: web::Data<HashSet<String>>,
 ) -> impl Responder {
     let maybe_pkh = address::pkh_from_address(&query.address);
 
@@ -50,6 +51,13 @@ async fn work(
             ),
         });
     };
+
+    // Empty whitelist allows everyone
+    if !whitelist.is_empty() && !whitelist.contains(&pkh) {
+        return HttpResponse::Forbidden().json(GenericMessageResponse {
+            message: "Access denied".to_string(),
+        });
+    }
 
     let maybe_maybe_miner = get_miner_by_pkh(&pool, &pkh).await;
 

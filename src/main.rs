@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::fs::File;
 use std::sync::Arc;
 use std::{path::Path, fs};
@@ -44,8 +45,11 @@ async fn main() -> std::io::Result<()> {
     tokio::spawn(block_updater(block_service.clone()));
     tokio::spawn(submission_updater(pool.clone()));
     
+    let whitelist = parse_whitelist();
+
     HttpServer::new(move || {
         App::new()
+            .app_data(Data::new(whitelist.clone()))
             .app_data(Data::new(pool.clone()))
             .app_data(Data::new(block_service.clone()))
             .service(health)
@@ -65,4 +69,9 @@ fn pool_is_configured() {
     std::env::var("POOL_FIXED_FEE").expect("POOL_FIXED_FEE must be set");
     std::env::var("KUPO_URL").expect("KUPO_URL must be set");
     std::env::var("OGMIOS_URL").expect("OGMIOS_URL must be set");
+}
+
+fn parse_whitelist() -> HashSet<String> {
+    let whitelist_str = std::env::var("WHITELIST").unwrap_or_default();
+    whitelist_str.split(',').map(|s| s.to_string()).collect()
 }
