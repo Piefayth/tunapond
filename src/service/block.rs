@@ -10,7 +10,7 @@ const TUNA_CONTRACT_NFT_POLICY_PREVIEW: &str = "502fbfbdafc7ddada9c335bd1440781e
 
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ReadableBlock {
-    pub block_number: i64,
+    pub block_number: i32,
     pub current_hash: String,
     pub leading_zeroes: u8,
     pub difficulty_number: u16,
@@ -37,7 +37,7 @@ impl From<Block> for ReadableBlock {
 
 #[derive(Debug, Default, Deserialize, Serialize, Clone, PartialEq, Eq, Hash)]
 pub struct Block {
-    pub block_number: i64,
+    pub block_number: i32,
     pub current_hash: Vec<u8>,
     pub leading_zeroes: u8,
     pub difficulty_number: u16,
@@ -66,7 +66,7 @@ pub struct KupoUtxo {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct KupoUtxoCreated {
-    pub slot_no: i64,
+    pub slot_no: i32,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -223,7 +223,7 @@ fn block_from_datum(datum: String, tx: KupoUtxo) -> Result<Block, BlockServiceEr
             BlockServiceError::BlockParseFailure
         })?;
     
-    let block_number = typed_data.data().get(0).as_integer().unwrap().as_int().unwrap().as_i32_or_nothing().unwrap() as i64;
+    let block_number = typed_data.data().get(0).as_integer().unwrap().as_int().unwrap().as_i32_or_nothing().unwrap() as i32;
     let current_hash = typed_data.data().get(1).as_bytes().unwrap();
     let leading_zeroes = typed_data.data().get(2).as_integer().unwrap().as_int().unwrap().as_i32_or_nothing().unwrap() as u8;
     let difficulty_number = typed_data.data().get(3).as_integer().unwrap().as_int().unwrap().as_i32_or_nothing().unwrap() as u16;

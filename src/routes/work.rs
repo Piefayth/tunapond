@@ -3,7 +3,7 @@ use std::sync::Arc;
 use actix_web::{get, web, HttpResponse, Responder};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{Pool, Postgres};
 use crate::{
     common::GenericMessageResponse,
     address::{self},
@@ -21,7 +21,7 @@ struct WorkRequest {
 
 #[derive(Debug, Serialize)]
 struct WorkResponse {
-    miner_id: i64,
+    miner_id: i32,
     nonce: String,
     min_zeroes: u8,
     current_block: ReadableBlock,
@@ -29,14 +29,14 @@ struct WorkResponse {
 
 #[derive(Debug, Serialize)]
 struct RawWorkResponse {
-    miner_id: i64,
+    miner_id: i32,
     min_zeroes: u8,
     raw_target_state: String,
 }
 
 #[get("/work")]
 async fn work(
-    pool: web::Data<SqlitePool>, 
+    pool: web::Data<Pool<Postgres>>, 
     query: web::Query<WorkRequest>,
     block_service: web::Data<Arc<BlockService>>,
 ) -> impl Responder {
@@ -62,7 +62,7 @@ async fn work(
                         message: format!("Could not save new miner {}", query.address),
                     });
                 };
-                miner_id as i64
+                miner_id
             }
         },
         Err(_) => {
@@ -97,7 +97,7 @@ async fn work(
 
 }
 
-pub fn generate_nonce(miner_id: i64) -> [u8; 16] {
+pub fn generate_nonce(miner_id: i32) -> [u8; 16] {
     let pool_id: u8 = std::env::var("POOL_ID")
         .expect("POOL_ID must be set")
         .parse()
@@ -111,7 +111,7 @@ pub fn generate_nonce(miner_id: i64) -> [u8; 16] {
     nonce[0..12].copy_from_slice(&rng.gen::<[u8; 12]>());
 
     // 3 byte miner_id
-    nonce[12..15].copy_from_slice(&miner_id.to_be_bytes()[5..8]);
+    nonce[12..15].copy_from_slice(&miner_id.to_be_bytes()[1..]);
 
     // 1 byte pool_id
     nonce[15] = pool_id;

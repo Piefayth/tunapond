@@ -1,13 +1,13 @@
 use actix_web::{ get, web, Responder, HttpResponse};
 use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{Postgres, Pool};
 
 use crate::{common::GenericMessageResponse, model::proof_of_work::{self, ProofOfWork}};
 
 #[derive(Debug, Deserialize)]
 struct HashrateRequest {
-    miner_id: Option<i64>,
+    miner_id: Option<i32>,
     start_time: u64,
     end_time: Option<u64>
 }
@@ -19,7 +19,7 @@ struct HashrateResponse {
 
 #[get("/hashrate")]
 async fn hashrate(
-    pool: web::Data<SqlitePool>,
+    pool: web::Data<Pool<Postgres>>,
     query: web::Query<HashrateRequest>,
 ) -> impl Responder  {
     let now = Utc::now().naive_utc();

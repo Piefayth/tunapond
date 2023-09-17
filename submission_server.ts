@@ -44,6 +44,12 @@ const TUNA_VALIDATOR_HASH_PREVIEW = "502fbfbdafc7ddada9c335bd1440781e5445d08bada
 const TUNA_VALIDATOR_ADDRESS_MAINNET = "addr1wynelppvx0hdjp2tnc78pnt28veznqjecf9h3wy4edqajxsg7hwsc"
 const TUNA_VALIDATOR_ADDRESS_PREVIEW = "addr_test1wpgzl0aa4lramtdfcv6m69zq0q09g3ws3wk6wlwzqv5xdfsdcf2qa"
 
+const tunaScriptRefUtxo = await lucid.utxosByOutRef([{
+  txHash:
+    "01751095ea408a3ebe6083b4de4de8a24b635085183ab8a2ac76273ef8fff5dd",
+  outputIndex: 0,
+}]);
+
 async function handler(request: Request): Promise<Response> {
   const url = new URL(request.url);
   
@@ -210,16 +216,21 @@ async function handleSubmitRetrying(answer: DenoSubmission, retries = 0): Promis
         },
       )
       .mintAssets(mintTuna, Data.to(new Constr(0, [])))
-      .attachSpendingValidator({  // TODO: Read from chain instead of having in here
-        type: "PlutusV2",
-        script: tunaValidatorCode
-      })
       .attachMetadata(674, {
         hash_rate: BigInt(Math.floor(answer.hash_rate)),
       })
       .readFrom(poolScriptRef)
       .validTo(realTimeNow + 180000)
       .validFrom(realTimeNow)
+    
+    if (network === "Preview") {
+      temp_tx.attachSpendingValidator({
+        type: "PlutusV2",
+        script: tunaValidatorCode
+      })
+    } else {
+      temp_tx.readFrom(tunaScriptRefUtxo)
+    }
 
     const tx = await temp_tx.complete()
     const signed = await tx.sign().complete()

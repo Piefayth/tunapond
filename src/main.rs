@@ -6,7 +6,7 @@ use actix_web::web::Data;
 use actix_web::{get, App, HttpResponse, HttpServer, Responder};
 use service::block::{BlockService, block_updater};
 use service::submission::submission_updater;
-use sqlx::{SqlitePool};
+use sqlx::postgres::PgPoolOptions;
 
 mod address;
 mod model;
@@ -33,29 +33,11 @@ async fn main() -> std::io::Result<()> {
     let listen_port_str = std::env::var("LISTEN_PORT").unwrap_or(String::from("7959"));
     let listen_port: u16 = listen_port_str.parse().expect("Invalid port number");
 
-    let sanitized_url = database_url.replace("sqlite://", "");
-    let db_path = Path::new(&sanitized_url);
-
-    if let Some(parent) = db_path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).expect("Failed to create database directory.");
-        }
-    }
-
-    if !db_path.exists() {
-        File::create(&db_path).expect("Failed to create database file.");
-    }
-
-    let pool = SqlitePool::connect(&format!("{}", database_url)).await.unwrap();
+    let pool = PgPoolOptions::new()
+        .max_connections(10)
+        .connect(&database_url).await.unwrap();
 
     sqlx::migrate!().run(&pool).await.unwrap();
-
-    sqlx::query("PRAGMA journal_mode=WAL")
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    log::info!("WAL is enabled.");
 
     let block_service = Arc::new(BlockService::new());
 

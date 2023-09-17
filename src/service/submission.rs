@@ -19,7 +19,7 @@ use cardano_multiplatform_lib::{
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{ Postgres, Pool};
 
 use crate::{
     address::pkh_from_address,
@@ -79,8 +79,9 @@ pub struct DenoSubmissionResponse {
 }
 
 pub async fn submit(
-    pool: &SqlitePool,
+    pool: &Pool<Postgres>,
     current_block: &Block,
+    miner_id: i32,
     sha: &[u8],
     nonce: &[u8],
 ) -> Result<(), SubmissionError> {
@@ -91,7 +92,12 @@ pub async fn submit(
         .map(|s| s.parse().unwrap_or(default_fee))
         .unwrap_or(default_fee);
 
-    let total_payout = TUNA_PER_DATUM - pool_fixed_fee as usize;
+    let default_finders_fee: i64 = 20000000;
+    let finders_fee: i64 = std::env::var("POOL_FIXED_FEE")
+        .map(|s| s.parse().unwrap_or(default_finders_fee))
+        .unwrap_or(default_finders_fee);
+
+    let total_payout = TUNA_PER_DATUM - pool_fixed_fee as usize - finders_fee as usize;
 
     let maybe_last_paid_datum = get_newest_confirmed_datum(pool).await?;
 
@@ -138,7 +144,12 @@ pub async fn submit(
         let miner_hashrate = estimate_hashrate(proofs.as_ref(), start_time, end_time);
         let miner_share = miner_hashrate as f64 / estimated_hashrate_total as f64;
         let miner_payment = (total_payout as f64 * miner_share) as usize;
-        miner_payments.insert(miner_address.clone(), miner_payment);
+        let miner_bonus = if proofs.first().is_some() && proofs.first().unwrap().miner_id == miner_id {
+            finders_fee
+        } else {
+            0
+        } as usize;
+        miner_payments.insert(miner_address.clone(), miner_payment + miner_bonus);
     }
 
     let submission = DenoSubmission {
@@ -172,7 +183,7 @@ pub async fn submit(
     Ok(())
 }
 
-pub async fn submission_updater(pool: SqlitePool) {
+pub async fn submission_updater(pool: Pool<Postgres>) {
     let kupo_url = std::env::var("KUPO_URL")
         .expect("Cannot instantiate BlockService because KUPO_URL is not set.");
 

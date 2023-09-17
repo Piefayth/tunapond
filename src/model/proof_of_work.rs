@@ -1,22 +1,22 @@
-use sqlx::sqlite::SqlitePool;
 use chrono::NaiveDateTime;
+use sqlx::{Postgres, Pool};
 
 use crate::{service::proof_of_work::ProcessedSubmissionEntry};
 
 #[derive(Clone)]
 pub struct ProofOfWork {
-    pub miner_id: i64,
+    pub miner_id: i32,
     pub miner_address: String,
-    pub block_number: i64,
+    pub block_number: i32,
     pub sha: String,
     pub nonce: String,
     pub created_at: NaiveDateTime,
 }
 
 pub async fn create(
-    pool: &SqlitePool,
-    miner_id: i64,
-    block_number: i64,
+    pool: &Pool<Postgres>,
+    miner_id: i32,
+    block_number: i32,
     new_pows: &Vec<ProcessedSubmissionEntry>,
 ) -> Result<u64, sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -30,11 +30,11 @@ pub async fn create(
             r#"
             INSERT INTO proof_of_work
             (miner_id, block_number, sha, nonce, created_at)
-            VALUES (?, ?, ?, ?, datetime('now'))
+            VALUES ($1, $2, $3, $4, NOW())
             "#,
             miner_id, block_number, hex_sha, hex_nonce
         )
-        .execute(tx.as_mut())
+        .execute(&mut tx)
         .await {
             Ok(_) => success_count += 1,
             Err(e) => {
@@ -49,8 +49,8 @@ pub async fn create(
 }
 
 pub async fn get_by_time_range(
-    pool: &SqlitePool,
-    miner_id: Option<i64>,
+    pool: &Pool<Postgres>,
+    miner_id: Option<i32>,
     start_time: NaiveDateTime,
     end_time: NaiveDateTime,
 ) -> Result<Vec<ProofOfWork>, sqlx::Error> {
@@ -62,7 +62,7 @@ pub async fn get_by_time_range(
                 SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
                 FROM proof_of_work
                 JOIN miners on miner_id = miners.id
-                WHERE miner_id = ? AND created_at BETWEEN ? AND ?
+                WHERE miner_id = $1 AND created_at BETWEEN $2 AND $3
                 "#,
                 id, start_time, end_time
             )
@@ -76,7 +76,7 @@ pub async fn get_by_time_range(
                 SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
                 FROM proof_of_work
                 JOIN miners on miner_id = miners.id
-                WHERE created_at BETWEEN ? AND ?
+                WHERE created_at BETWEEN $1 AND $2
                 "#,
                 start_time, end_time
             )
@@ -86,7 +86,7 @@ pub async fn get_by_time_range(
     }
 }
 
-pub async fn get_oldest(pool: &SqlitePool) -> Result<Option<ProofOfWork>, sqlx::Error> {
+pub async fn get_oldest(pool: &Pool<Postgres>) -> Result<Option<ProofOfWork>, sqlx::Error> {
     sqlx::query_as!(
         ProofOfWork,
         r#"
@@ -101,7 +101,7 @@ pub async fn get_oldest(pool: &SqlitePool) -> Result<Option<ProofOfWork>, sqlx::
     .await
 }
 
-pub async fn cleanup_old_proofs(pool: &SqlitePool, num_to_retain: i64) -> Result<(), sqlx::Error> {
+pub async fn cleanup_old_proofs(pool: &Pool<Postgres>, num_to_retain: i64) -> Result<(), sqlx::Error> {
     let offset = num_to_retain - 1;
     let date_of_nth_oldest_confirmed_datum_result = sqlx::query!(
         r#"
@@ -109,7 +109,7 @@ pub async fn cleanup_old_proofs(pool: &SqlitePool, num_to_retain: i64) -> Result
         FROM datum_submissions
         WHERE confirmed_at IS NOT NULL
         ORDER BY confirmed_at DESC
-        LIMIT 1 OFFSET ?
+        LIMIT 1 OFFSET $1
         "#,
         offset
     )
@@ -122,7 +122,7 @@ pub async fn cleanup_old_proofs(pool: &SqlitePool, num_to_retain: i64) -> Result
         sqlx::query!(
             r#"
             DELETE FROM proof_of_work
-            WHERE created_at < ?
+            WHERE created_at < $1
             AND (sha, block_number) NOT IN (
                 SELECT sha, block_number
                 FROM datum_submissions

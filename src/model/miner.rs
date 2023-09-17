@@ -1,42 +1,41 @@
-use sqlx::sqlite::SqlitePool;
+use sqlx::{Postgres, Pool};
 
 // Define the Miner structure to map with the database table.
 pub struct Miner {
-    pub id: i64,
+    pub id: i32,
+    pub address: String,
     pub pkh: String,
 }
 
 // Function to create a new miner.
-pub async fn create_miner(pool: &SqlitePool, pkh: String, address: String) -> Result<i64, sqlx::Error> {
+pub async fn create_miner(pool: &Pool<Postgres>, pkh: String, address: String) -> Result<i32, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    sqlx::query!(
+    let rec = sqlx::query!(
         r#"
         INSERT INTO miners
         (pkh, address)
-        VALUES (?, ?)
+        VALUES ($1, $2)
+        RETURNING id
         "#,
         pkh, address
     )
-    .execute(tx.as_mut())
+    .fetch_one(&mut tx)
     .await?;
-
-    let id: (i64,) = sqlx::query_as("SELECT last_insert_rowid()")
-        .fetch_one(tx.as_mut())
-        .await?;
 
     tx.commit().await?;
 
-    Ok(id.0)
+    Ok(rec.id)
 }
+
 // Optionally: Function to get a miner by its primary key hash (pkh).
-pub async fn get_miner_by_pkh(pool: &SqlitePool, pkh: &str) -> Result<Option<Miner>, sqlx::Error> {
+pub async fn get_miner_by_pkh(pool: &Pool<Postgres>, pkh: &str) -> Result<Option<Miner>, sqlx::Error> {
     sqlx::query_as!(
         Miner,
         r#"
-        SELECT id, pkh
+        SELECT id, address, pkh
         FROM miners
-        WHERE pkh = ?
+        WHERE pkh = $1
         "#,
         pkh
     )

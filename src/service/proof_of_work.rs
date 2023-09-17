@@ -11,7 +11,7 @@ use cardano_multiplatform_lib::plutus::PlutusList;
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::SqlitePool;
+use sqlx::{Postgres, Pool};
 use std::sync::Arc;
 
 use super::block::{BlockService, BlockServiceError, ReadableBlock, Block};
@@ -66,7 +66,10 @@ pub struct RawSubmitProofOfWorkResponse {
 
 const SAMPLING_DIFFICULTY: u8 = 8;
 
+#[derive(Debug, Clone)]
 pub struct ProcessedSubmissionEntry {
+    pub miner_id: i32,
+    pub block_number: i32,
     pub nonce: [u8; 16],
     pub sha: [u8; 32]
 }
@@ -100,9 +103,9 @@ pub fn block_to_target_state(block: &Block, nonce: &[u8; 16]) -> PlutusData {
 }
 
 pub async fn submit_proof_of_work(
-    pool: &SqlitePool,
+    pool: &Pool<Postgres>,
     block_service: &Arc<BlockService>,
-    miner_id: i64,
+    miner_id: i32,
     submission: &Submission,
 ) -> Result<SubmitProofOfWorkResponse, SubmitProofOfWorkError> {
     let pool_id: u8 = std::env::var("POOL_ID")
@@ -141,18 +144,18 @@ pub async fn submit_proof_of_work(
                 return None
             }
 
-            return Some(ProcessedSubmissionEntry { nonce: nonce_bytes, sha: hashed_hash })
+            return Some(ProcessedSubmissionEntry { miner_id, block_number: current_block.block_number, nonce: nonce_bytes, sha: hashed_hash })
         })
         .collect();
 
         
-    let num_accepted = proof_of_work::create(
+    proof_of_work::create(
         pool,
         miner_id,
         current_block.block_number,
         &valid_samples,
     )
-    .await?;
+    .await;
 
     let maybe_found_block = valid_samples.iter().find(|sample| {
         let entry_difficulty = get_difficulty(&sample.sha);
@@ -176,6 +179,7 @@ pub async fn submit_proof_of_work(
             let _ = submit(
                 pool,
                 &current_block,
+                miner_id,
                 &entry.sha,
                 &entry.nonce
             )
@@ -185,7 +189,7 @@ pub async fn submit_proof_of_work(
     }
 
     Ok(SubmitProofOfWorkResponse {
-        num_accepted: num_accepted,
+        num_accepted: valid_samples.len() as u64,
         working_block: current_block.into(),
         nonce: hex::encode(&nonce)
     })
@@ -199,7 +203,7 @@ fn sha256_digest_as_bytes(data: &[u8]) -> [u8; 32] {
     arr
 }
 
-fn verify_nonce(nonce_bytes: &[u8], miner_id: i64, pool_id: u8) -> bool {
+fn verify_nonce(nonce_bytes: &[u8], miner_id: i32, pool_id: u8) -> bool {
     if nonce_bytes.len() != 16 {
         return false;
     }
@@ -208,7 +212,7 @@ fn verify_nonce(nonce_bytes: &[u8], miner_id: i64, pool_id: u8) -> bool {
     let last_4_bytes = &nonce_bytes[12..16];
 
     // Compare the first 3 bytes of the last 4 bytes to miner_id
-    if &miner_id.to_be_bytes()[5..8] != &last_4_bytes[..3] {
+    if &miner_id.to_be_bytes()[1..] != &last_4_bytes[..3] {
         println!("miner id: {}", &miner_id);
         println!("miner id: {:?}", &miner_id.to_be_bytes()[1..]);
         return false;

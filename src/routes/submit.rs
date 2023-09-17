@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use actix_web::{ post, web, HttpResponse, Responder};
 use serde::{Serialize, Deserialize};
-use sqlx::SqlitePool;
+use sqlx::{Postgres, Pool};
 use crate::common::GenericMessageResponse;
 use crate::routes::work::generate_nonce;
 use crate::service::proof_of_work::{block_to_target_state, RawSubmitProofOfWorkResponse};
@@ -26,7 +26,7 @@ pub struct SubmissionEntry {
 
 #[post("/submit")]
 async fn submit(
-    pool: web::Data<SqlitePool>,
+    pool: web::Data<Pool<Postgres>>,
     block_service: web::Data<Arc<BlockService>>,
     submission: web::Json<Submission>,
     query: web::Query<SubmissionQuery>,
