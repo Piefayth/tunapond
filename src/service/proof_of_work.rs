@@ -1,4 +1,4 @@
-use crate::model::proof_of_work::ProofOfWork;
+
 use crate::model::proof_of_work::{self};
 use crate::routes::submit::{Submission};
 use crate::routes::work::generate_nonce;
@@ -8,7 +8,7 @@ use cardano_multiplatform_lib::ledger::common::value::BigNum;
 use cardano_multiplatform_lib::plutus::ConstrPlutusData;
 use cardano_multiplatform_lib::plutus::PlutusData;
 use cardano_multiplatform_lib::plutus::PlutusList;
-use chrono::NaiveDateTime;
+
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Pool};
@@ -21,7 +21,6 @@ use super::submission::SubmissionError;
 #[derive(Debug)]
 pub enum SubmitProofOfWorkError {
     DatabaseError(sqlx::Error),
-    InvalidTargetState,
     BlockServiceFailure(BlockServiceError),
     PlutusParseError(JsError),
     SubmissionError(SubmissionError),
@@ -73,8 +72,6 @@ pub struct ProcessedSubmissionEntry {
     pub nonce: [u8; 16],
     pub sha: [u8; 32]
 }
-
-const default_nonce: [u8; 16] = [0; 16];
 
 pub fn block_to_target_state(block: &Block, nonce: &[u8; 16]) -> PlutusData {
     let mut target_state_fields = PlutusList::new();
@@ -149,13 +146,13 @@ pub async fn submit_proof_of_work(
         .collect();
 
         
-    proof_of_work::create(
+    let _ = proof_of_work::create(
         pool,
         miner_id,
         current_block.block_number,
         &valid_samples,
     )
-    .await;
+    .await?;
 
     let maybe_found_block = valid_samples.iter().find(|sample| {
         let entry_difficulty = get_difficulty(&sample.sha);

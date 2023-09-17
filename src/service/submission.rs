@@ -1,33 +1,17 @@
 use std::collections::HashMap;
 
 use cardano_multiplatform_lib::{
-    address::{Address, StakeCredential},
-    builders::tx_builder::{TransactionBuilder, TransactionBuilderConfigBuilder},
-    chain_crypto::Ed25519,
-    crypto::{Bip32PrivateKey, PrivateKey, TransactionHash},
     error::JsError,
-    genesis::network_info::plutus_alonzo_cost_models,
-    ledger::{
-        alonzo::{self, fees::LinearFee},
-        common::{
-            utxo::TransactionUnspentOutput,
-            value::{BigInt, BigNum, Int, Value},
-        },
-    },
-    plutus::{self, ConstrPlutusData, ExUnitPrices, PlutusData, PlutusList},
-    TransactionInput, TransactionOutput, UnitInterval,
 };
-use chrono::{DateTime, Utc};
+use chrono::{Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{ Postgres, Pool};
 
 use crate::{
-    address::pkh_from_address,
     model::{
         datum_submission::{
             self, accept, get_newest_confirmed_datum, get_unconfirmed, reject, DatumSubmission,
         },
-        miner::get_miner_by_pkh,
         proof_of_work::{self, get_by_time_range, cleanup_old_proofs},
     },
     routes::hashrate::estimate_hashrate,
@@ -75,7 +59,7 @@ pub struct DenoSubmission {
 #[derive(Deserialize)]
 pub struct DenoSubmissionResponse {
     tx_hash: String,
-    message: String,
+    //message: String,
 }
 
 pub async fn submit(

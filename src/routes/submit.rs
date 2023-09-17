@@ -6,7 +6,7 @@ use sqlx::{Postgres, Pool};
 use crate::common::GenericMessageResponse;
 use crate::routes::work::generate_nonce;
 use crate::service::proof_of_work::{block_to_target_state, RawSubmitProofOfWorkResponse};
-use crate::{address, service::{proof_of_work::{submit_proof_of_work, SubmitProofOfWorkError, SubmitProofOfWorkResponse}, block::BlockService}, model::miner::get_miner_by_pkh};
+use crate::{address, service::{proof_of_work::{submit_proof_of_work, SubmitProofOfWorkError}, block::BlockService}, model::miner::get_miner_by_pkh};
 
 #[derive(Debug, Deserialize)]
 struct SubmissionQuery {
@@ -95,13 +95,6 @@ async fn submit(
                     HttpResponse::InternalServerError().json(
                         GenericMessageResponse { 
                             message: format!("Could not verify submission - unable to parse plutus data.")
-                        }
-                    )
-                },
-                SubmitProofOfWorkError::InvalidTargetState => {
-                    HttpResponse::InternalServerError().json(
-                        GenericMessageResponse { 
-                            message: format!("Could not verify submission - unable to create a valid target state.")
                         }
                     )
                 },
