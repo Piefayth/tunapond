@@ -35,7 +35,7 @@ async fn hashrate(
         });
     };
 
-    let maybe_pow = proof_of_work::get_by_time_range(
+    let maybe_pow = proof_of_work::count_by_time_range(
         &pool, query.miner_id, start_time.unwrap(), end_time.unwrap()
     ).await;
 
@@ -49,7 +49,7 @@ async fn hashrate(
     
     HttpResponse::Ok().json(
         HashrateResponse { 
-            estimated_hash_rate: estimate_hashrate(&pow, start_time.unwrap(), end_time.unwrap())
+            estimated_hash_rate: estimate_hashrate_numeric(pow as usize, start_time.unwrap(), end_time.unwrap())
         }
     )
 }
@@ -79,6 +79,25 @@ pub fn estimate_hashrate(
     let zeros = sampling_difficulty; // TODO: this value comes from somewhere else? this is "min_zeroes" really...
 
     let total_hashes = estimate_hashes_for_difficulty(valid_proofs, zeros as u32);
+
+    total_hashes / duration.num_seconds() as f64
+}
+
+pub fn estimate_hashrate_numeric(
+    proof_count: usize,
+    start_time: NaiveDateTime,
+    end_time: NaiveDateTime,
+) -> f64 {
+    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
+        .expect("SAMPLING_DIFFICULTY must be set")
+        .parse()
+        .expect("SAMPLING_DIFFICULTY must be a valid number");
+
+    let duration = end_time - start_time;
+
+    let zeros = sampling_difficulty; 
+
+    let total_hashes = estimate_hashes_for_difficulty(proof_count, zeros as u32);
 
     total_hashes / duration.num_seconds() as f64
 }

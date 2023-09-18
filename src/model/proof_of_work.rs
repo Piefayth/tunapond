@@ -136,3 +136,40 @@ pub async fn cleanup_old_proofs(pool: &Pool<Postgres>, num_to_retain: i64) -> Re
 
     Ok(())
 }
+
+pub async fn count_by_time_range(
+    pool: &Pool<Postgres>,
+    miner_id: Option<i32>,
+    start_time: NaiveDateTime,
+    end_time: NaiveDateTime,
+) -> Result<i64, sqlx::Error> {
+    match miner_id {
+        Some(id) => {
+            let result = sqlx::query!(
+                r#"
+                SELECT COUNT(*) as count
+                FROM proof_of_work
+                WHERE miner_id = $1 AND created_at BETWEEN $2 AND $3
+                "#,
+                id, start_time, end_time
+            )
+            .fetch_one(pool)
+            .await?;
+            Ok(result.count.unwrap_or(0))
+        },
+        None => {
+            let result = sqlx::query!(
+                r#"
+                SELECT COUNT(*) as count
+                FROM proof_of_work
+                WHERE created_at BETWEEN $1 AND $2
+                "#,
+                start_time, end_time
+            )
+            .fetch_one(pool)
+            .await?;
+
+            Ok(result.count.unwrap_or(0))
+        },
+    }
+}
