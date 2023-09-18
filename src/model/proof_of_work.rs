@@ -137,6 +137,33 @@ pub async fn cleanup_old_proofs(pool: &Pool<Postgres>, num_to_retain: i64) -> Re
     Ok(())
 }
 
+#[derive(Debug)]
+pub struct MinerProofCount {
+    pub miner_id: i32,
+    pub miner_address: String,
+    pub proof_count: i64
+}
+
+pub async fn count_by_time_range_by_miner_id(
+    pool: &Pool<Postgres>,
+    start_time: NaiveDateTime,
+    end_time: NaiveDateTime,
+) -> Result<Vec<MinerProofCount>, sqlx::Error> {
+    sqlx::query_as!(
+        MinerProofCount,
+        r#"
+        SELECT miner_id, miners.address as miner_address, COUNT(*) as "proof_count!"
+        FROM proof_of_work
+        JOIN miners on miner_id = miners.id
+        WHERE created_at BETWEEN $1 AND $2
+        GROUP BY miner_id, miners.address
+        "#,
+        start_time, end_time
+    )
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn count_by_time_range(
     pool: &Pool<Postgres>,
     miner_id: Option<i32>,

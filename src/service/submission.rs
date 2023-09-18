@@ -12,9 +12,9 @@ use crate::{
         datum_submission::{
             self, accept, get_newest_confirmed_datum, get_unconfirmed, reject, DatumSubmission,
         },
-        proof_of_work::{self, get_by_time_range, cleanup_old_proofs},
+        proof_of_work::{self, get_by_time_range, cleanup_old_proofs, count_by_time_range_by_miner_id},
     },
-    routes::hashrate::estimate_hashrate,
+    routes::hashrate::{estimate_hashrate, estimate_hashrate_numeric},
     service::proof_of_work::get_difficulty,
 };
 
@@ -110,30 +110,23 @@ pub async fn submit(
 
     let end_time = Utc::now().naive_utc();
 
-    let proofs = get_by_time_range(pool, None, start_time, end_time).await?;
+    let miner_counts = count_by_time_range_by_miner_id(pool, start_time, end_time).await?;
 
-    let estimated_hashrate_total = estimate_hashrate(&proofs, start_time, end_time);
-
-    let mut miner_proofs: std::collections::HashMap<String, Vec<_>> =
-        std::collections::HashMap::new();
-    for proof in &proofs {
-        miner_proofs
-            .entry(proof.miner_address.clone())
-            .or_insert_with(Vec::new)
-            .push(proof.clone());
-    }
-
+    let estimated_hashrate_total = miner_counts.iter().fold(0.0, |acc, m| {
+        acc + estimate_hashrate_numeric(m.proof_count as usize, start_time, end_time)
+    });
+    
     let mut miner_payments: HashMap<String, usize> = HashMap::new();
-    for (miner_address, proofs) in &miner_proofs {
-        let miner_hashrate = estimate_hashrate(proofs.as_ref(), start_time, end_time);
-        let miner_share = miner_hashrate as f64 / estimated_hashrate_total as f64;
+    for miner_count in &miner_counts {
+        let miner_hashrate = estimate_hashrate_numeric(miner_count.proof_count as usize, start_time, end_time);
+        let miner_share = miner_hashrate / estimated_hashrate_total;
         let miner_payment = (total_payout as f64 * miner_share) as usize;
-        let miner_bonus = if proofs.first().is_some() && proofs.first().unwrap().miner_id == miner_id {
+        let miner_bonus = if miner_count.miner_id == miner_id {
             finders_fee
         } else {
             0
         } as usize;
-        miner_payments.insert(miner_address.clone(), miner_payment + miner_bonus);
+        miner_payments.insert(miner_count.miner_address.clone(), miner_payment + miner_bonus);
     }
 
     let submission = DenoSubmission {

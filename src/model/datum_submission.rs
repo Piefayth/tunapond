@@ -104,6 +104,7 @@ pub async fn get_newest_confirmed_datum(pool: &Pool<Postgres>) -> Result<Option<
                ds.rejected, ds.created_at, ds.confirmed_at, pow.block_number
         FROM datum_submissions AS ds
         JOIN proof_of_work AS pow ON ds.sha = pow.sha
+        WHERE confirmed_in_slot IS NOT NULL
         ORDER BY confirmed_in_slot DESC
         LIMIT 1
         "#,

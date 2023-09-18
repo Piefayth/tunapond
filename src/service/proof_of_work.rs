@@ -168,7 +168,7 @@ pub async fn submit_proof_of_work(
             entry_difficulty.difficulty_number < current_block.difficulty_number as u128;
 
         // to keep the submission server from exploding due to request volume in preview, submission are minimum 10
-        let enough_preview_zeroes = entry_difficulty.leading_zeroes > 9; 
+        let enough_preview_zeroes = entry_difficulty.leading_zeroes > 8; 
         let is_true_new_block = too_many_zeroes || (just_enough_zeroes && enough_difficulty);
 
         enough_preview_zeroes && is_true_new_block
