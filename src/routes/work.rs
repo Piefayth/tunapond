@@ -80,6 +80,11 @@ async fn work(
         }
     };
 
+    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
+        .expect("SAMPLING_DIFFICULTY must be set")
+        .parse()
+        .expect("SAMPLING_DIFFICULTY must be a valid number");
+
     let nonce = generate_nonce(miner_id);
 
     let Ok(current_block) = block_service.get_latest() else {
@@ -91,14 +96,14 @@ async fn work(
     if query.raw.is_some() && query.raw.unwrap() {
         HttpResponse::Ok().json(RawWorkResponse {
             miner_id,
-            min_zeroes: 8,
+            min_zeroes: sampling_difficulty,
             raw_target_state: hex::encode(block_to_target_state(&current_block, &nonce).to_bytes())
         })
     } else {
         HttpResponse::Ok().json(WorkResponse {
             nonce: hex::encode(nonce),
             miner_id,
-            min_zeroes: 8,
+            min_zeroes: sampling_difficulty,
             current_block: current_block.into()
         })
     }

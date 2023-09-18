@@ -65,15 +65,20 @@ pub fn estimate_hashrate(
     start_time: NaiveDateTime,
     end_time: NaiveDateTime,
 ) -> f64 {
+    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
+        .expect("SAMPLING_DIFFICULTY must be set")
+        .parse()
+        .expect("SAMPLING_DIFFICULTY must be a valid number");
+
     let duration = end_time - start_time;
 
     let valid_proofs = proofs
         .iter()
         .filter(|p| p.created_at >= start_time && p.created_at <= end_time)
         .count();
-    let zeros = 8; // TODO: this value comes from somewhere else? this is "min_zeroes" really...
+    let zeros = sampling_difficulty; // TODO: this value comes from somewhere else? this is "min_zeroes" really...
 
-    let total_hashes = estimate_hashes_for_difficulty(valid_proofs, zeros);
+    let total_hashes = estimate_hashes_for_difficulty(valid_proofs, zeros as u32);
 
     total_hashes / duration.num_seconds() as f64
 }

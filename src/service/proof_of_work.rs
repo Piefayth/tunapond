@@ -63,8 +63,6 @@ pub struct RawSubmitProofOfWorkResponse {
     pub raw_target_state: String,
 }
 
-const SAMPLING_DIFFICULTY: u8 = 8;
-
 #[derive(Debug, Clone)]
 pub struct ProcessedSubmissionEntry {
     pub miner_id: i32,
@@ -110,6 +108,11 @@ pub async fn submit_proof_of_work(
         .parse()
         .expect("POOL_ID must be a valid number");
 
+    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
+        .expect("SAMPLING_DIFFICULTY must be set")
+        .parse()
+        .expect("SAMPLING_DIFFICULTY must be a valid number");
+
     // TODO: Some database errors (like primary key collisions) are a result of malicious miner
     // behavior. Depending on the error, miners may need removed from the pool...
 
@@ -133,7 +136,7 @@ pub async fn submit_proof_of_work(
             let hashed_hash = sha256_digest_as_bytes(&hashed_data);
 
             let entry_difficulty = get_difficulty(&hashed_hash);
-            if entry_difficulty.leading_zeroes < SAMPLING_DIFFICULTY as u128 {
+            if entry_difficulty.leading_zeroes < sampling_difficulty as u128 {
                 return None
             }
 
@@ -210,8 +213,6 @@ fn verify_nonce(nonce_bytes: &[u8], miner_id: i32, pool_id: u8) -> bool {
 
     // Compare the first 3 bytes of the last 4 bytes to miner_id
     if &miner_id.to_be_bytes()[1..] != &last_4_bytes[..3] {
-        println!("miner id: {}", &miner_id);
-        println!("miner id: {:?}", &miner_id.to_be_bytes()[1..]);
         return false;
     }
 
