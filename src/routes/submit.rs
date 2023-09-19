@@ -29,7 +29,7 @@ pub struct SubmissionEntry {
 
 
 lazy_static! {
-    static ref RATE_LIMITER: Mutex<HashMap<String, Instant>> = Mutex::new(HashMap::new());
+    static ref RATE_LIMITER: Mutex<HashMap<String, (Instant, usize)>> = Mutex::new(HashMap::new());
 }
 
 #[post("/submit")]
@@ -39,23 +39,10 @@ async fn submit(
     submission: web::Json<Submission>,
     query: web::Query<SubmissionQuery>,
 ) -> impl Responder {
-    let max_entries: usize = std::env::var("MAX_SUBMISSION_ENTRIES")
-        .unwrap_or_else(|_| "10".to_string())
+    let max_submissions_per_minute: usize = std::env::var("MAX_SUBMISSIONS_PER_MINUTE")
+        .unwrap_or_else(|_| "500".to_string())
         .parse()
-        .unwrap_or(10);
-
-    let submit_frequency_ms: u64 = std::env::var("SUBMIT_FREQUENCY_MS")
-        .unwrap_or_else(|_| "1000".to_string())
-        .parse()
-        .unwrap_or(1000);
-
-    if submission.entries.len() > max_entries {
-        return HttpResponse::BadRequest().json(
-            GenericMessageResponse { 
-                message: format!("Too many entries in submission. Max allowed is {}", max_entries)
-            }
-        )
-    }
+        .unwrap_or(500);
 
     let maybe_pkh = address::pkh_from_address(&submission.address);
     
@@ -68,18 +55,31 @@ async fn submit(
     };
 
     let mut rate_limiter = RATE_LIMITER.lock().await;
-
-    if let Some(last_request_time) = rate_limiter.get(&pkh) {
-        if last_request_time.elapsed() < tokio::time::Duration::from_millis(submit_frequency_ms) {
-            return HttpResponse::TooManyRequests().json(
-                GenericMessageResponse { 
-                    message: String::from("Too many requests.")
+    let current_time = Instant::now();
+    let new_entries_count = submission.entries.len();
+    
+    match rate_limiter.entry(pkh.clone()) {
+        std::collections::hash_map::Entry::Occupied(entry) => {
+            let (last_request_time, count) = entry.into_mut();
+            
+            if current_time.duration_since(*last_request_time) < tokio::time::Duration::from_secs(60) {
+                *count += new_entries_count;
+                if *count > max_submissions_per_minute {
+                    return HttpResponse::TooManyRequests().json(
+                        GenericMessageResponse { 
+                            message: String::from("Too many submissions in the past minute.")
+                        }
+                    );
                 }
-            );
+            } else {
+                *last_request_time = current_time;
+                *count = new_entries_count;
+            }
+        },
+        std::collections::hash_map::Entry::Vacant(entry) => {
+            entry.insert((current_time, new_entries_count));
         }
     }
-
-    rate_limiter.insert(pkh.clone(), Instant::now());
     
     let maybe_maybe_miner = get_miner_by_pkh(&pool, &pkh).await;
     let Ok(maybe_miner) = maybe_maybe_miner else {
