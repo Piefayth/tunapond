@@ -165,7 +165,7 @@ pub async fn submit_proof_of_work(
         // to keep the submission server from exploding due to request volume in preview, submission are minimum 10
         let enough_preview_zeroes = entry_difficulty.leading_zeroes > 9;
         if (enough_preview_zeroes) {
-            log::info!("almost a new block {}", hex::encode(sample.nonce))
+            log::info!("almost a new block {}, zeroes: {}, diff: {}", hex::encode(sample.nonce), entry_difficulty.leading_zeroes, entry_difficulty.difficulty_number);
         }
         let is_true_new_block = too_many_zeroes || (just_enough_zeroes && enough_difficulty);
 
