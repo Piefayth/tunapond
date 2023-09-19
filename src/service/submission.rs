@@ -12,9 +12,9 @@ use crate::{
         datum_submission::{
             self, accept, get_newest_confirmed_datum, get_unconfirmed, reject, DatumSubmission,
         },
-        proof_of_work::{self, get_by_time_range, cleanup_old_proofs, count_by_time_range_by_miner_id},
+        proof_of_work::{self, cleanup_old_proofs, count_by_time_range},
     },
-    routes::hashrate::{estimate_hashrate, estimate_hashrate_numeric},
+    routes::hashrate::{estimate_hashes_for_difficulty},
     service::proof_of_work::get_difficulty,
 };
 
@@ -109,24 +109,33 @@ pub async fn submit(
     };
 
     let end_time = Utc::now().naive_utc();
+    let duration = end_time - start_time;
+    let miner_counts = count_by_time_range(pool, None, start_time, end_time).await?;
 
-    let miner_counts = count_by_time_range_by_miner_id(pool, start_time, end_time).await?;
+    let mut miner_estimated_hashes_map: HashMap<i32, f64> = HashMap::new();
 
-    let estimated_hashrate_total = miner_counts.iter().fold(0.0, |acc, m| {
-        acc + estimate_hashrate_numeric(m.proof_count as usize, start_time, end_time)
-    });
-    
-    let mut miner_payments: HashMap<String, usize> = HashMap::new();
-    for miner_count in &miner_counts {
-        let miner_hashrate = estimate_hashrate_numeric(miner_count.proof_count as usize, start_time, end_time);
-        let miner_share = miner_hashrate / estimated_hashrate_total;
+    // Calculate the total estimated hashes for each miner and the overall total.
+    for proof_detail in &miner_counts {
+        let estimated_hashes = estimate_hashes_for_difficulty(proof_detail.proof_count as usize, proof_detail.sampling_difficulty as u8);
+        *miner_estimated_hashes_map.entry(proof_detail.miner_id).or_insert(0.0) += estimated_hashes;
+    }
+
+    let total_estimated_hashes = miner_estimated_hashes_map.values().sum::<f64>();
+
+    let mut miner_payments: HashMap<String, usize> = HashMap::new();    
+    for proof_detail in &miner_counts {
+        let miner_estimated_hashes = *miner_estimated_hashes_map.get(&proof_detail.miner_id).unwrap_or(&0.0);
+        let miner_share = miner_estimated_hashes / total_estimated_hashes;
+        
         let miner_payment = (total_payout as f64 * miner_share) as usize;
-        let miner_bonus = if miner_count.miner_id == miner_id {
+        
+        let miner_bonus = if proof_detail.miner_id == miner_id {
             finders_fee
         } else {
             0
         } as usize;
-        miner_payments.insert(miner_count.miner_address.clone(), miner_payment + miner_bonus);
+
+        miner_payments.insert(proof_detail.miner_address.clone(), miner_payment + miner_bonus);
     }
 
     let submission = DenoSubmission {
@@ -136,7 +145,7 @@ pub async fn submit(
         new_difficulty: new_diff_data.difficulty_number as i64,
         new_zeroes: new_diff_data.leading_zeroes as i64,
         miner_payments: miner_payments.clone(),
-        hash_rate: estimated_hashrate_total,
+        hash_rate: total_estimated_hashes / duration.num_seconds() as f64,
     };
 
     let response: DenoSubmissionResponse = reqwest::Client::new()

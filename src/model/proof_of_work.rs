@@ -29,10 +29,10 @@ pub async fn create(
         match sqlx::query!(
             r#"
             INSERT INTO proof_of_work
-            (miner_id, block_number, sha, nonce, created_at)
-            VALUES ($1, $2, $3, $4, NOW())
+            (miner_id, block_number, sha, nonce, sampling_difficulty, created_at)
+            VALUES ($1, $2, $3, $4, $5, NOW())
             "#,
-            miner_id, block_number, hex_sha, hex_nonce
+            miner_id, block_number, hex_sha, hex_nonce, new_pow.sampling_difficulty as i32
         )
         .execute(&mut tx)
         .await {
@@ -46,44 +46,6 @@ pub async fn create(
     tx.commit().await?;
 
     Ok(success_count) // Returns the number of successful insertions.
-}
-
-pub async fn get_by_time_range(
-    pool: &Pool<Postgres>,
-    miner_id: Option<i32>,
-    start_time: NaiveDateTime,
-    end_time: NaiveDateTime,
-) -> Result<Vec<ProofOfWork>, sqlx::Error> {
-    match miner_id {
-        Some(id) => {
-            sqlx::query_as!(
-                ProofOfWork,
-                r#"
-                SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
-                FROM proof_of_work
-                JOIN miners on miner_id = miners.id
-                WHERE miner_id = $1 AND created_at BETWEEN $2 AND $3
-                "#,
-                id, start_time, end_time
-            )
-            .fetch_all(pool)
-            .await
-        }
-        None => {
-            sqlx::query_as!(
-                ProofOfWork,
-                r#"
-                SELECT miner_id, miners.address as miner_address, block_number, sha, nonce, created_at
-                FROM proof_of_work
-                JOIN miners on miner_id = miners.id
-                WHERE created_at BETWEEN $1 AND $2
-                "#,
-                start_time, end_time
-            )
-            .fetch_all(pool)
-            .await
-        }
-    }
 }
 
 pub async fn get_oldest(pool: &Pool<Postgres>) -> Result<Option<ProofOfWork>, sqlx::Error> {
@@ -141,27 +103,8 @@ pub async fn cleanup_old_proofs(pool: &Pool<Postgres>, num_to_retain: i64) -> Re
 pub struct MinerProofCount {
     pub miner_id: i32,
     pub miner_address: String,
-    pub proof_count: i64
-}
-
-pub async fn count_by_time_range_by_miner_id(
-    pool: &Pool<Postgres>,
-    start_time: NaiveDateTime,
-    end_time: NaiveDateTime,
-) -> Result<Vec<MinerProofCount>, sqlx::Error> {
-    sqlx::query_as!(
-        MinerProofCount,
-        r#"
-        SELECT miner_id, miners.address as miner_address, COUNT(*) as "proof_count!"
-        FROM proof_of_work
-        JOIN miners on miner_id = miners.id
-        WHERE created_at BETWEEN $1 AND $2
-        GROUP BY miner_id, miners.address
-        "#,
-        start_time, end_time
-    )
-    .fetch_all(pool)
-    .await
+    pub proof_count: i64,
+    pub sampling_difficulty: i32
 }
 
 pub async fn count_by_time_range(
@@ -169,34 +112,37 @@ pub async fn count_by_time_range(
     miner_id: Option<i32>,
     start_time: NaiveDateTime,
     end_time: NaiveDateTime,
-) -> Result<i64, sqlx::Error> {
+) -> Result<Vec<MinerProofCount>, sqlx::Error> {
     match miner_id {
         Some(id) => {
-            let result = sqlx::query!(
+            sqlx::query_as!(
+                MinerProofCount,
                 r#"
-                SELECT COUNT(*) as count
+                SELECT miner_id, miners.address as miner_address, proof_of_work.sampling_difficulty, COUNT(*) as "proof_count!"
                 FROM proof_of_work
+                JOIN miners on miner_id = miners.id
                 WHERE miner_id = $1 AND created_at BETWEEN $2 AND $3
+                GROUP BY miner_id, miners.address, proof_of_work.sampling_difficulty
                 "#,
                 id, start_time, end_time
             )
-            .fetch_one(pool)
-            .await?;
-            Ok(result.count.unwrap_or(0))
+            .fetch_all(pool)
+            .await
         },
         None => {
-            let result = sqlx::query!(
+            sqlx::query_as!(
+                MinerProofCount,
                 r#"
-                SELECT COUNT(*) as count
+                SELECT miner_id, miners.address as miner_address, proof_of_work.sampling_difficulty, COUNT(*) as "proof_count!"
                 FROM proof_of_work
+                JOIN miners on miner_id = miners.id
                 WHERE created_at BETWEEN $1 AND $2
+                GROUP BY miner_id, miners.address, proof_of_work.sampling_difficulty
                 "#,
                 start_time, end_time
             )
-            .fetch_one(pool)
-            .await?;
-
-            Ok(result.count.unwrap_or(0))
+            .fetch_all(pool)
+            .await
         },
     }
 }

@@ -3,7 +3,7 @@ use chrono::{NaiveDateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Pool};
 
-use crate::{common::GenericMessageResponse, model::proof_of_work::{self, ProofOfWork}};
+use crate::{common::GenericMessageResponse, model::proof_of_work::{self, MinerProofCount}};
 
 #[derive(Debug, Deserialize)]
 struct HashrateRequest {
@@ -39,65 +39,35 @@ async fn hashrate(
         &pool, query.miner_id, start_time.unwrap(), end_time.unwrap()
     ).await;
 
-    let Ok(pow) = maybe_pow else {
-        return HttpResponse::InternalServerError().json(GenericMessageResponse {
-            message: format!(
-                "Failed to fetch proofs of work.",
-            ),
-        });
+    let pow = match maybe_pow {
+        Ok(p) => p,
+        Err(_) => return HttpResponse::InternalServerError().json(GenericMessageResponse {
+            message: format!("Failed to fetch proofs of work."),
+        })
     };
     
     HttpResponse::Ok().json(
         HashrateResponse { 
-            estimated_hash_rate: estimate_hashrate_numeric(pow as usize, start_time.unwrap(), end_time.unwrap())
+            estimated_hash_rate: estimate_hashrate(pow, start_time.unwrap(), end_time.unwrap())
         }
     )
 }
 
-fn estimate_hashes_for_difficulty(proofs: usize, zeros: u32) -> f64 {
-    let p_n: f64 = 16f64.powi(-(zeros as i32));
-    (proofs as f64) / p_n
+pub fn estimate_hashes_for_difficulty(proof_count: usize, zeros: u8) -> f64 {
+    let estimated_proofs_per_proof: f64 = 16f64.powi(zeros as i32);  
+    (proof_count as f64) * estimated_proofs_per_proof
 }
 
-/// Given a vec of ProofOfWork structs and a time range, calculate the hashrate.
 pub fn estimate_hashrate(
-    proofs: &Vec<ProofOfWork>,
+    proofs: Vec<MinerProofCount>,
     start_time: NaiveDateTime,
     end_time: NaiveDateTime,
 ) -> f64 {
-    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
-        .expect("SAMPLING_DIFFICULTY must be set")
-        .parse()
-        .expect("SAMPLING_DIFFICULTY must be a valid number");
-
     let duration = end_time - start_time;
 
-    let valid_proofs = proofs
-        .iter()
-        .filter(|p| p.created_at >= start_time && p.created_at <= end_time)
-        .count();
-    let zeros = sampling_difficulty; // TODO: this value comes from somewhere else? this is "min_zeroes" really...
-
-    let total_hashes = estimate_hashes_for_difficulty(valid_proofs, zeros as u32);
-
-    total_hashes / duration.num_seconds() as f64
-}
-
-pub fn estimate_hashrate_numeric(
-    proof_count: usize,
-    start_time: NaiveDateTime,
-    end_time: NaiveDateTime,
-) -> f64 {
-    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
-        .expect("SAMPLING_DIFFICULTY must be set")
-        .parse()
-        .expect("SAMPLING_DIFFICULTY must be a valid number");
-
-    let duration = end_time - start_time;
-
-    let zeros = sampling_difficulty; 
-
-    let total_hashes = estimate_hashes_for_difficulty(proof_count, zeros as u32);
+    let total_hashes: f64 = proofs.into_iter().map(|proof| {
+        estimate_hashes_for_difficulty(proof.proof_count as usize, proof.sampling_difficulty as u8)
+    }).sum();
 
     total_hashes / duration.num_seconds() as f64
 }

@@ -2307,6 +2307,7 @@ dependencies = [
  "dotenv",
  "env_logger",
  "hex",
+ "lazy_static",
  "log",
  "once_cell",
  "rand",
