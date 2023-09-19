@@ -149,7 +149,7 @@ pub async fn submit_proof_of_work(
         })
         .collect();
 
-    let _ =
+    let num_inserted =
         proof_of_work::create(pool, miner_id, current_block.block_number, &valid_samples).await?;
 
     let maybe_found_block = valid_samples.iter().find(|sample| {
@@ -164,6 +164,9 @@ pub async fn submit_proof_of_work(
 
         // to keep the submission server from exploding due to request volume in preview, submission are minimum 10
         let enough_preview_zeroes = entry_difficulty.leading_zeroes > 9;
+        if (enough_preview_zeroes) {
+            log::info!("almost a new block {}", hex::encode(sample.nonce))
+        }
         let is_true_new_block = too_many_zeroes || (just_enough_zeroes && enough_difficulty);
 
         enough_preview_zeroes && is_true_new_block
@@ -171,13 +174,14 @@ pub async fn submit_proof_of_work(
 
     match maybe_found_block {
         Some(entry) => {
+            log::info!("submitting");
             let _ = submit(pool, &current_block, miner_id, &entry.sha, &entry.nonce).await;
         }
         None => {}
     }
 
     Ok(SubmitProofOfWorkResponse {
-        num_accepted: valid_samples.len() as u64,
+        num_accepted: num_inserted,
         working_block: current_block.into(),
         nonce: hex::encode(&nonce),
     })
