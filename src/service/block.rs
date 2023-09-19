@@ -195,7 +195,7 @@ pub async fn block_updater(service: Arc<BlockService>) {
                 // good
             },
             Err(err) => {
-                println!("Block updater error: |{:?}|", err);
+                log::error!("Block updater error: |{:?}|", err);
             },
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(datum_update_interval)).await;

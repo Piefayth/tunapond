@@ -7,7 +7,7 @@ use sqlx::{Pool, Postgres};
 use crate::{
     common::GenericMessageResponse,
     address::{self},
-    model::miner::{create_miner, get_miner_by_pkh},
+    model::miner::{create_miner, get_miner_by_pkh, update_sampling_difficulty_by_pkh},
     service::{
         block::{BlockService, ReadableBlock}, proof_of_work::block_to_target_state,
     },
@@ -16,7 +16,8 @@ use crate::{
 #[derive(Debug, Deserialize)]
 struct WorkRequest {
     address: String,
-    raw: Option<bool>
+    sample_diff: Option<u8>,
+    raw: Option<bool>,
 }
 
 #[derive(Debug, Serialize)]
@@ -59,18 +60,33 @@ async fn work(
         });
     }
 
+    let minimum_sample_diff = 5;    // might not be needed with the limits on /submit
+    let default_sample_diff = 8;
+    let requested_sampling_diff = match query.sample_diff {
+        Some(diff_req) => {
+            if diff_req < minimum_sample_diff {
+                minimum_sample_diff
+            } else {
+                diff_req
+            }
+        }
+        None => {
+            default_sample_diff
+        }
+    };
+
     let maybe_maybe_miner = get_miner_by_pkh(&pool, &pkh).await;
 
-    let miner_id = match maybe_maybe_miner {
+    let miner = match maybe_maybe_miner {
         Ok(maybe_miner) => match maybe_miner {
-            Some(miner) => miner.id,
+            Some(miner) => miner,
             None => {
-                let Ok(miner_id) = create_miner(&pool, pkh, query.address.clone()).await else {
+                let Ok(miner) = create_miner(&pool, pkh, query.address.clone()).await else {
                     return HttpResponse::InternalServerError().json(GenericMessageResponse {
                         message: format!("Could not save new miner {}", query.address),
                     });
                 };
-                miner_id
+                miner
             }
         },
         Err(_) => {
@@ -80,12 +96,19 @@ async fn work(
         }
     };
 
-    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
-        .expect("SAMPLING_DIFFICULTY must be set")
-        .parse()
-        .expect("SAMPLING_DIFFICULTY must be a valid number");
+    // if the miners requested sampling diff is different from what they requested, update it 
+    let miner = if miner.sampling_difficulty as u8 != requested_sampling_diff {
+        let Ok(updated_miner) = update_sampling_difficulty_by_pkh(&pool, &miner.pkh, requested_sampling_diff).await else {
+            return HttpResponse::InternalServerError().json(GenericMessageResponse {
+                message: format!("Could not update miner {}", query.address),
+            });
+        };
+        updated_miner
+    } else {
+        miner
+    };
 
-    let nonce = generate_nonce(miner_id);
+    let nonce = generate_nonce(miner.id);
 
     let Ok(current_block) = block_service.get_latest() else {
         return HttpResponse::InternalServerError().json(GenericMessageResponse {
@@ -95,15 +118,15 @@ async fn work(
 
     if query.raw.is_some() && query.raw.unwrap() {
         HttpResponse::Ok().json(RawWorkResponse {
-            miner_id,
-            min_zeroes: sampling_difficulty,
+            miner_id: miner.id,
+            min_zeroes: miner.sampling_difficulty as u8,
             raw_target_state: hex::encode(block_to_target_state(&current_block, &nonce).to_bytes())
         })
     } else {
         HttpResponse::Ok().json(WorkResponse {
             nonce: hex::encode(nonce),
-            miner_id,
-            min_zeroes: sampling_difficulty,
+            miner_id: miner.id,
+            min_zeroes: miner.sampling_difficulty as u8,
             current_block: current_block.into()
         })
     }

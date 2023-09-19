@@ -1,6 +1,5 @@
-
 use crate::model::proof_of_work::{self};
-use crate::routes::submit::{Submission};
+use crate::routes::submit::Submission;
 use crate::routes::work::generate_nonce;
 use cardano_multiplatform_lib::error::JsError;
 use cardano_multiplatform_lib::ledger::common::value::BigInt;
@@ -11,10 +10,10 @@ use cardano_multiplatform_lib::plutus::PlutusList;
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use sqlx::{Postgres, Pool};
+use sqlx::{Pool, Postgres};
 use std::sync::Arc;
 
-use super::block::{BlockService, BlockServiceError, ReadableBlock, Block};
+use super::block::{Block, BlockService, BlockServiceError, ReadableBlock};
 use super::submission::submit;
 use super::submission::SubmissionError;
 
@@ -68,7 +67,8 @@ pub struct ProcessedSubmissionEntry {
     pub miner_id: i32,
     pub block_number: i32,
     pub nonce: [u8; 16],
-    pub sha: [u8; 32]
+    pub sha: [u8; 32],
+    pub sampling_difficulty: u8, 
 }
 
 pub fn block_to_target_state(block: &Block, nonce: &[u8; 16]) -> PlutusData {
@@ -78,8 +78,7 @@ pub fn block_to_target_state(block: &Block, nonce: &[u8; 16]) -> PlutusData {
     let block_number_field = PlutusData::new_integer(&BigInt::from(block.block_number));
     let current_hash_field = PlutusData::new_bytes(block.current_hash.clone());
     let leading_zeroes_field = PlutusData::new_integer(&BigInt::from(block.leading_zeroes));
-    let difficulty_number_field =
-        PlutusData::new_integer(&BigInt::from(block.difficulty_number));
+    let difficulty_number_field = PlutusData::new_integer(&BigInt::from(block.difficulty_number));
     let epoch_time_field = PlutusData::new_integer(&BigInt::from(block.epoch_time));
 
     target_state_fields.add(&nonce_field);
@@ -94,24 +93,20 @@ pub fn block_to_target_state(block: &Block, nonce: &[u8; 16]) -> PlutusData {
         &target_state_fields,
     ));
 
-    return target_state
+    return target_state;
 }
 
 pub async fn submit_proof_of_work(
     pool: &Pool<Postgres>,
     block_service: &Arc<BlockService>,
     miner_id: i32,
+    miner_sampling_difficulty: u8,
     submission: &Submission,
 ) -> Result<SubmitProofOfWorkResponse, SubmitProofOfWorkError> {
     let pool_id: u8 = std::env::var("POOL_ID")
         .expect("POOL_ID must be set")
         .parse()
         .expect("POOL_ID must be a valid number");
-
-    let sampling_difficulty: u8 = std::env::var("SAMPLING_DIFFICULTY")
-        .expect("SAMPLING_DIFFICULTY must be set")
-        .parse()
-        .expect("SAMPLING_DIFFICULTY must be a valid number");
 
     // TODO: Some database errors (like primary key collisions) are a result of malicious miner
     // behavior. Depending on the error, miners may need removed from the pool...
@@ -127,7 +122,7 @@ pub async fn submit_proof_of_work(
             let nonce_binding = hex::decode(&entry.nonce).unwrap_or_default();
 
             if nonce_binding.len() != 16 {
-                return None
+                return None;
             }
             let nonce_bytes: [u8; 16] = nonce_binding.try_into().unwrap();
 
@@ -136,26 +131,26 @@ pub async fn submit_proof_of_work(
             let hashed_hash = sha256_digest_as_bytes(&hashed_data);
 
             let entry_difficulty = get_difficulty(&hashed_hash);
-            if entry_difficulty.leading_zeroes < sampling_difficulty as u128 {
-                return None
+            if entry_difficulty.leading_zeroes < miner_sampling_difficulty as u128 {
+                return None;
             }
 
             if !verify_nonce(&nonce_bytes, miner_id, pool_id) {
-                return None
+                return None;
             }
 
-            return Some(ProcessedSubmissionEntry { miner_id, block_number: current_block.block_number, nonce: nonce_bytes, sha: hashed_hash })
+            return Some(ProcessedSubmissionEntry {
+                miner_id,
+                block_number: current_block.block_number,
+                nonce: nonce_bytes,
+                sha: hashed_hash,
+                sampling_difficulty: miner_sampling_difficulty,
+            });
         })
         .collect();
 
-        
-    let _ = proof_of_work::create(
-        pool,
-        miner_id,
-        current_block.block_number,
-        &valid_samples,
-    )
-    .await?;
+    let _ =
+        proof_of_work::create(pool, miner_id, current_block.block_number, &valid_samples).await?;
 
     let maybe_found_block = valid_samples.iter().find(|sample| {
         let entry_difficulty = get_difficulty(&sample.sha);
@@ -168,7 +163,7 @@ pub async fn submit_proof_of_work(
             entry_difficulty.difficulty_number < current_block.difficulty_number as u128;
 
         // to keep the submission server from exploding due to request volume in preview, submission are minimum 10
-        let enough_preview_zeroes = entry_difficulty.leading_zeroes > 8; 
+        let enough_preview_zeroes = entry_difficulty.leading_zeroes > 9;
         let is_true_new_block = too_many_zeroes || (just_enough_zeroes && enough_difficulty);
 
         enough_preview_zeroes && is_true_new_block
@@ -176,14 +171,7 @@ pub async fn submit_proof_of_work(
 
     match maybe_found_block {
         Some(entry) => {
-            let _ = submit(
-                pool,
-                &current_block,
-                miner_id,
-                &entry.sha,
-                &entry.nonce
-            )
-            .await;
+            let _ = submit(pool, &current_block, miner_id, &entry.sha, &entry.nonce).await;
         }
         None => {}
     }
@@ -191,7 +179,7 @@ pub async fn submit_proof_of_work(
     Ok(SubmitProofOfWorkResponse {
         num_accepted: valid_samples.len() as u64,
         working_block: current_block.into(),
-        nonce: hex::encode(&nonce)
+        nonce: hex::encode(&nonce),
     })
 }
 
