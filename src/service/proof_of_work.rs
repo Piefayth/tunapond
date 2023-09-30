@@ -149,7 +149,7 @@ pub async fn submit_proof_of_work(
         })
         .collect();
 
-    let _ =
+    let num_accepted =
         proof_of_work::create(pool, miner_id, current_block.block_number, &valid_samples).await?;
 
     let maybe_found_block = valid_samples.iter().find(|sample| {
@@ -177,7 +177,7 @@ pub async fn submit_proof_of_work(
     }
 
     Ok(SubmitProofOfWorkResponse {
-        num_accepted: valid_samples.len() as u64,
+        num_accepted,
         working_block: current_block.into(),
         nonce: hex::encode(&nonce),
     })
